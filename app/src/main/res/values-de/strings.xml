@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Last Meeting</string>
+    <string name="title_meetings">Sitzungen</string>
+    <string name="title_meeting_details">Sitzungsdetails</string>
+    <string name="title_settings">Einstellungen</string>
+
+    <!-- Navigation & Views -->
+    <string name="view_list">Liste</string>
+    <string name="view_calendar">Kalender</string>
+    <string name="action_record">Aufnehmen</string>
+    <string name="action_stop_recording">Aufnahme stoppen</string>
+    <string name="recording_in_progress">Aufnahme läuft…</string>
+
+    <!-- Meeting Details -->
+    <string name="label_title">Titel</string>
+    <string name="label_date">Datum</string>
+    <string name="label_duration">Dauer</string>
+    <string name="action_transcribe">Transkribieren</string>
+    <string name="action_protocolize">Protokollieren</string>
+    <string name="label_transcript">Transkript</string>
+    <string name="label_protocol">Protokoll</string>
+    <string name="label_audio">Audioaufnahme</string>
+    <string name="no_transcript">Noch kein Transkript vorhanden.</string>
+    <string name="no_protocol">Noch kein Protokoll vorhanden.</string>
+    <string name="default_meeting_title">Sitzung %1$s</string>
+
+    <!-- Audio Player -->
+    <string name="action_play">Abspielen</string>
+    <string name="action_pause">Pause</string>
+
+    <!-- Export & Sharing -->
+    <string name="action_download_transcript_pdf">Transkript-PDF exportieren</string>
+    <string name="action_download_protocol_pdf">Protokoll-PDF exportieren</string>
+    <string name="action_share_audio">Audio teilen</string>
+    <string name="action_share_transcript">Transkript teilen</string>
+    <string name="action_share_protocol">Protokoll teilen</string>
+
+    <!-- Deletions -->
+    <string name="action_delete_meeting">Sitzung löschen</string>
+    <string name="action_delete_transcript">Transkript löschen</string>
+    <string name="action_delete_protocol">Protokoll löschen</string>
+    <string name="confirm_delete_title">Löschen bestätigen</string>
+    <string name="confirm_delete_meeting">Möchten Sie diese Sitzung wirklich löschen? Die Audioaufnahme, das Transkript und das Protokoll werden dauerhaft vom Gerät gelöscht.</string>
+    <string name="confirm_delete_transcript">Möchten Sie das Transkript wirklich löschen?</string>
+    <string name="confirm_delete_protocol">Möchten Sie das Protokoll wirklich löschen?</string>
+    <string name="action_cancel">Abbrechen</string>
+    <string name="action_delete">Löschen</string>
+
+    <!-- AI Processing State -->
+    <string name="status_transcribing">Audio wird per KI transkribiert…</string>
+    <string name="status_protocolizing">Protokoll wird per KI erstellt…</string>
+    <string name="msg_ai_success">KI-Verarbeitung erfolgreich abgeschlossen.</string>
+    <string name="msg_ai_error">KI-Fehler: %1$s</string>
+    <string name="msg_missing_api_key">Bitte konfigurieren Sie zuerst Ihren API-Schlüssel in den Einstellungen.</string>
+    <string name="msg_exported_pdf">PDF wurde unter Downloads/LastMeeting gespeichert.</string>
+
+    <!-- Settings -->
+    <string name="label_api_base_url">OpenAI-kompatible API Base-URL</string>
+    <string name="label_api_key">API-Schlüssel</string>
+    <string name="label_model">Multimodaler KI-Modellname</string>
+    <string name="label_transcription_prompt">Systemprompt für Transkription</string>
+    <string name="label_protocol_prompt">Systemprompt für Protokoll</string>
+    <string name="action_save_settings">Einstellungen speichern</string>
+    <string name="msg_settings_saved">Einstellungen erfolgreich gespeichert.</string>
+
+    <!-- Default Prompts -->
+    <string name="default_transcription_prompt">Du bist ein präziser Assistent für Audiotranskription. Höre dir das bereitgestellte Sitzungsaudio an und erstelle ein wörtliches, genaues Transkript. Gib ausschließlich den Transkripttext aus.</string>
+    <string name="default_protocol_prompt">Du bist ein professioneller Sitzungsassistent. Höre dir das bereitgestellte Sitzungsaudio an und erstelle ein meisterhaftes, strukturiertes Sitzungsprotokoll. Enthalte: 1. Zusammenfassung, 2. Hauptdiskussionspunkte, 3. Wichtige Entscheidungen und 4. Nächste Schritte &amp; Aufgaben.</string>
+</resources>

@@ -64,3 +64,17 @@
 - **Preferences**: Jetpack DataStore
 - **HTTP Client**: Ktor / OkHttp
 - **Dependency Injection**: Hilt / Kotlin-inject or ViewModel Factory
+
+---
+
+## 2. Git & GitHub Workflow Rules
+
+1. **Branching**:
+   - Always update before starting: `git checkout main && git pull origin main`
+   - Create isolated feature branches: `ai/feature/issue-<number>-<description>` or `ai/feature/<description>`
+2. **Commits**:
+   - Follow Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`
+   - Keep commits small, atomic, and focused.
+3. **Build & Pull Requests**:
+   - Verify build locally (`./gradlew assembleDebug` or `./gradlew build`) before pushing.
+   - Push branch (`git push -u origin <branch-name>`) and create PR (`gh pr create`).

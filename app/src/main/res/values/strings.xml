@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Last Meeting</string>
+    <string name="title_meetings">Meetings</string>
+    <string name="title_meeting_details">Meeting Details</string>
+    <string name="title_settings">Settings</string>
+
+    <!-- Navigation & Views -->
+    <string name="view_list">List</string>
+    <string name="view_calendar">Calendar</string>
+    <string name="action_record">Record</string>
+    <string name="action_stop_recording">Stop Recording</string>
+    <string name="recording_in_progress">Recording in progress…</string>
+
+    <!-- Meeting Details -->
+    <string name="label_title">Title</string>
+    <string name="label_date">Date</string>
+    <string name="label_duration">Duration</string>
+    <string name="action_transcribe">Transcribe</string>
+    <string name="action_protocolize">Protocolize</string>
+    <string name="label_transcript">Transcript</string>
+    <string name="label_protocol">Protocol</string>
+    <string name="label_audio">Audio Recording</string>
+    <string name="no_transcript">No transcript created yet.</string>
+    <string name="no_protocol">No protocol created yet.</string>
+    <string name="default_meeting_title">Meeting %1$s</string>
+
+    <!-- Audio Player -->
+    <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
+
+    <!-- Export & Sharing -->
+    <string name="action_download_transcript_pdf">Export Transcript PDF</string>
+    <string name="action_download_protocol_pdf">Export Protocol PDF</string>
+    <string name="action_share_audio">Share Audio</string>
+    <string name="action_share_transcript">Share Transcript</string>
+    <string name="action_share_protocol">Share Protocol</string>
+
+    <!-- Deletions -->
+    <string name="action_delete_meeting">Delete Meeting</string>
+    <string name="action_delete_transcript">Delete Transcript</string>
+    <string name="action_delete_protocol">Delete Protocol</string>
+    <string name="confirm_delete_title">Confirm Delete</string>
+    <string name="confirm_delete_meeting">Are you sure you want to delete this meeting? The audio recording, transcript, and protocol will be permanently removed from device storage.</string>
+    <string name="confirm_delete_transcript">Are you sure you want to delete the transcript?</string>
+    <string name="confirm_delete_protocol">Are you sure you want to delete the protocol?</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+
+    <!-- AI Processing State -->
+    <string name="status_transcribing">Transcribing audio via AI…</string>
+    <string name="status_protocolizing">Creating protocol via AI…</string>
+    <string name="msg_ai_success">AI operation completed successfully.</string>
+    <string name="msg_ai_error">AI Error: %1$s</string>
+    <string name="msg_missing_api_key">Please configure your API Key in Settings first.</string>
+    <string name="msg_exported_pdf">PDF exported to Downloads/LastMeeting.</string>
+
+    <!-- Settings -->
+    <string name="label_api_base_url">OpenAI Compatible API Base URL</string>
+    <string name="label_api_key">API Key</string>
+    <string name="label_model">Multimodal AI Model Name</string>
+    <string name="label_transcription_prompt">Transcription System Prompt</string>
+    <string name="label_protocol_prompt">Protocol System Prompt</string>
+    <string name="action_save_settings">Save Settings</string>
+    <string name="msg_settings_saved">Settings saved successfully.</string>
+
+    <!-- Default Prompts -->
+    <string name="default_transcription_prompt">You are a precise audio transcription assistant. Listen to the provided meeting audio and write an accurate verbatim transcript. Output only the transcript text.</string>
+    <string name="default_protocol_prompt">You are an executive meeting assistant. Listen to the provided meeting audio and create a clear, structured meeting protocol. Include: 1. Executive Summary, 2. Key Discussion Topics, 3. Key Decisions Made, and 4. Action Items &amp; Next Steps.</string>
+</resources>
