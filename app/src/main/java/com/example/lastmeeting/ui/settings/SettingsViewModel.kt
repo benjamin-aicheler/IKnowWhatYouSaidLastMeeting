@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lastmeeting.LastMeetingApp
+import com.example.lastmeeting.R
 import com.example.lastmeeting.data.preferences.ApiSettings
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -48,7 +49,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 transcriptionPrompt = transcriptionPrompt,
                 protocolPrompt = protocolPrompt
             )
-            _messageFlow.emit("Settings saved successfully.")
+            _messageFlow.emit(app.getString(R.string.msg_settings_saved))
         }
     }
 }

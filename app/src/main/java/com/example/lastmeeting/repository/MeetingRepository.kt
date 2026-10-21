@@ -7,8 +7,10 @@ import com.example.lastmeeting.data.db.MeetingDao
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.data.preferences.SettingsRepository
 import com.example.lastmeeting.util.PdfExporter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -42,7 +44,10 @@ class MeetingRepository(
     }
 
     suspend fun updateTitle(id: Long, newTitle: String) {
-        meetingDao.updateTitle(id, newTitle.trim())
+        val trimmed = newTitle.trim()
+        if (trimmed.isNotEmpty()) {
+            meetingDao.updateTitle(id, trimmed)
+        }
     }
 
     suspend fun transcribeMeeting(id: Long): Result<String> {
@@ -51,7 +56,7 @@ class MeetingRepository(
 
         val audioFile = File(meeting.audioFilePath)
         if (!audioFile.exists()) {
-            return Result.failure(Exception("Audio file not found on device."))
+            return Result.failure(Exception(context.getString(R.string.msg_audio_not_found)))
         }
 
         val settings = settingsRepository.settingsFlow.first()
@@ -78,7 +83,7 @@ class MeetingRepository(
 
         val audioFile = File(meeting.audioFilePath)
         if (!audioFile.exists()) {
-            return Result.failure(Exception("Audio file not found on device."))
+            return Result.failure(Exception(context.getString(R.string.msg_audio_not_found)))
         }
 
         val settings = settingsRepository.settingsFlow.first()
@@ -122,7 +127,18 @@ class MeetingRepository(
         }
     }
 
-    fun exportPdf(title: String, typeLabel: String, textContent: String): Result<String> {
-        return PdfExporter.exportToPdf(context, title, typeLabel, textContent)
-    }
+    suspend fun exportPdf(title: String, typeLabel: String, textContent: String): Result<String> =
+        withContext(Dispatchers.IO) {
+            PdfExporter.exportToPdf(context, title, typeLabel, textContent)
+        }
+
+    suspend fun exportPdfToCache(title: String, typeLabel: String, textContent: String): Result<File> =
+        withContext(Dispatchers.IO) {
+            PdfExporter.exportToCachePdf(context, title, typeLabel, textContent)
+        }
+
+    suspend fun exportAudio(title: String, audioFile: File): Result<String> =
+        withContext(Dispatchers.IO) {
+            PdfExporter.exportAudioToDownloads(context, title, audioFile)
+        }
 }

@@ -4,21 +4,29 @@ import android.app.Application
 import android.media.MediaPlayer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.example.lastmeeting.LastMeetingApp
+import com.example.lastmeeting.R
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.util.ShareUtil
+import com.example.lastmeeting.worker.AiProcessingWorker
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 sealed class DetailsUiEvent {
     data class ShowToast(val message: String) : DetailsUiEvent()
-    object MeetingDeleted : DetailsUiEvent()
+    data object MeetingDeleted : DetailsUiEvent()
 }
 
 class MeetingDetailsViewModel(
@@ -28,21 +36,38 @@ class MeetingDetailsViewModel(
 
     private val app = application as LastMeetingApp
     private val repository = app.meetingRepository
+    private val workManager = WorkManager.getInstance(application)
 
     val meeting: StateFlow<MeetingEntity?> = repository.getMeetingById(meetingId)
-        .let { flow ->
-            val stateFlow = MutableStateFlow<MeetingEntity?>(null)
-            viewModelScope.launch {
-                flow.collect { stateFlow.value = it }
-            }
-            stateFlow.asStateFlow()
-        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
 
-    private val _isTranscribing = MutableStateFlow(false)
-    val isTranscribing: StateFlow<Boolean> = _isTranscribing.asStateFlow()
+    private val transcribeWorkFlow = workManager.getWorkInfosForUniqueWorkFlow(
+        AiProcessingWorker.uniqueWorkName(meetingId, AiProcessingWorker.TASK_TRANSCRIBE)
+    )
 
-    private val _isProtocolizing = MutableStateFlow(false)
-    val isProtocolizing: StateFlow<Boolean> = _isProtocolizing.asStateFlow()
+    private val protocolizeWorkFlow = workManager.getWorkInfosForUniqueWorkFlow(
+        AiProcessingWorker.uniqueWorkName(meetingId, AiProcessingWorker.TASK_PROTOCOLIZE)
+    )
+
+    val isTranscribing: StateFlow<Boolean> = transcribeWorkFlow
+        .map { infos -> infos.any { !it.state.isFinished } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
+    val isProtocolizing: StateFlow<Boolean> = protocolizeWorkFlow
+        .map { infos -> infos.any { !it.state.isFinished } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
 
     private val _isPlayingAudio = MutableStateFlow(false)
     val isPlayingAudio: StateFlow<Boolean> = _isPlayingAudio.asStateFlow()
@@ -51,6 +76,48 @@ class MeetingDetailsViewModel(
     val eventFlow: SharedFlow<DetailsUiEvent> = _eventFlow.asSharedFlow()
 
     private var mediaPlayer: MediaPlayer? = null
+    private var isAudioPaused: Boolean = false
+
+    private val observedActiveWorkIds = mutableSetOf<UUID>()
+
+    init {
+        observeWorkCompletion(
+            workFlow = transcribeWorkFlow,
+            successMessageRes = R.string.msg_transcript_success
+        )
+        observeWorkCompletion(
+            workFlow = protocolizeWorkFlow,
+            successMessageRes = R.string.msg_protocol_success
+        )
+    }
+
+    private fun observeWorkCompletion(
+        workFlow: kotlinx.coroutines.flow.Flow<List<WorkInfo>>,
+        successMessageRes: Int
+    ) {
+        viewModelScope.launch {
+            workFlow.collect { infos ->
+                val info = infos.firstOrNull() ?: return@collect
+                if (!info.state.isFinished) {
+                    observedActiveWorkIds.add(info.id)
+                } else if (observedActiveWorkIds.remove(info.id)) {
+                    when (info.state) {
+                        WorkInfo.State.SUCCEEDED -> {
+                            _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(successMessageRes)))
+                        }
+                        WorkInfo.State.FAILED -> {
+                            val errorMsg = info.outputData.getString(AiProcessingWorker.KEY_ERROR_MESSAGE)
+                                ?: "Unknown error"
+                            _eventFlow.emit(
+                                DetailsUiEvent.ShowToast(app.getString(R.string.msg_ai_error, errorMsg))
+                            )
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+        }
+    }
 
     fun updateTitle(newTitle: String) {
         viewModelScope.launch {
@@ -63,7 +130,7 @@ class MeetingDetailsViewModel(
         val audioFile = File(currentMeeting.audioFilePath)
         if (!audioFile.exists()) {
             viewModelScope.launch {
-                _eventFlow.emit(DetailsUiEvent.ShowToast("Audio file not found."))
+                _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_audio_not_found)))
             }
             return
         }
@@ -71,27 +138,41 @@ class MeetingDetailsViewModel(
         if (_isPlayingAudio.value) {
             pauseAudio()
         } else {
-            playAudio(audioFile)
+            playOrResumeAudio(audioFile)
         }
     }
 
-    private fun playAudio(audioFile: File) {
+    private fun playOrResumeAudio(audioFile: File) {
         try {
+            val existingPlayer = mediaPlayer
+            if (existingPlayer != null && isAudioPaused) {
+                existingPlayer.start()
+                isAudioPaused = false
+                _isPlayingAudio.value = true
+                return
+            }
+
             stopAudioPlayer()
             val player = MediaPlayer().apply {
                 setDataSource(audioFile.absolutePath)
                 prepare()
                 setOnCompletionListener {
-                    _isPlayingAudio.value = false
+                    stopAudioPlayer()
                 }
                 start()
             }
             mediaPlayer = player
+            isAudioPaused = false
             _isPlayingAudio.value = true
         } catch (e: Exception) {
             e.printStackTrace()
+            stopAudioPlayer()
             viewModelScope.launch {
-                _eventFlow.emit(DetailsUiEvent.ShowToast("Failed to play audio: ${e.localizedMessage}"))
+                _eventFlow.emit(
+                    DetailsUiEvent.ShowToast(
+                        app.getString(R.string.msg_audio_play_error, e.localizedMessage ?: "")
+                    )
+                )
             }
         }
     }
@@ -99,6 +180,7 @@ class MeetingDetailsViewModel(
     private fun pauseAudio() {
         try {
             mediaPlayer?.pause()
+            isAudioPaused = true
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -108,48 +190,66 @@ class MeetingDetailsViewModel(
     private fun stopAudioPlayer() {
         try {
             mediaPlayer?.stop()
+        } catch (_: Exception) {
+        }
+        try {
             mediaPlayer?.release()
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (_: Exception) {
         }
         mediaPlayer = null
+        isAudioPaused = false
         _isPlayingAudio.value = false
     }
 
     fun transcribe() {
-        viewModelScope.launch {
-            _isTranscribing.value = true
-            val result = repository.transcribeMeeting(meetingId)
-            _isTranscribing.value = false
-            result.onSuccess {
-                _eventFlow.emit(DetailsUiEvent.ShowToast("Transcript generated successfully."))
-            }.onFailure { error ->
-                _eventFlow.emit(DetailsUiEvent.ShowToast("Transcription failed: ${error.localizedMessage}"))
-            }
-        }
+        AiProcessingWorker.enqueue(
+            context = app,
+            meetingId = meetingId,
+            taskType = AiProcessingWorker.TASK_TRANSCRIBE
+        )
     }
 
     fun protocolize() {
+        AiProcessingWorker.enqueue(
+            context = app,
+            meetingId = meetingId,
+            taskType = AiProcessingWorker.TASK_PROTOCOLIZE
+        )
+    }
+
+    fun downloadAudio() {
+        val currentMeeting = meeting.value ?: return
+        val audioFile = File(currentMeeting.audioFilePath)
         viewModelScope.launch {
-            _isProtocolizing.value = true
-            val result = repository.protocolizeMeeting(meetingId)
-            _isProtocolizing.value = false
-            result.onSuccess {
-                _eventFlow.emit(DetailsUiEvent.ShowToast("Protocol generated successfully."))
+            val result = repository.exportAudio(currentMeeting.title, audioFile)
+            result.onSuccess { path ->
+                _eventFlow.emit(
+                    DetailsUiEvent.ShowToast(app.getString(R.string.msg_exported_audio_path, path))
+                )
             }.onFailure { error ->
-                _eventFlow.emit(DetailsUiEvent.ShowToast("Protocol creation failed: ${error.localizedMessage}"))
+                _eventFlow.emit(
+                    DetailsUiEvent.ShowToast(
+                        app.getString(R.string.msg_export_audio_failed, error.localizedMessage ?: "")
+                    )
+                )
             }
         }
     }
 
     fun exportPdf(typeLabel: String, textContent: String) {
         val currentMeeting = meeting.value ?: return
-        val result = repository.exportPdf(currentMeeting.title, typeLabel, textContent)
         viewModelScope.launch {
+            val result = repository.exportPdf(currentMeeting.title, typeLabel, textContent)
             result.onSuccess { path ->
-                _eventFlow.emit(DetailsUiEvent.ShowToast("PDF exported to $path"))
+                _eventFlow.emit(
+                    DetailsUiEvent.ShowToast(app.getString(R.string.msg_exported_pdf_path, path))
+                )
             }.onFailure { error ->
-                _eventFlow.emit(DetailsUiEvent.ShowToast("PDF export failed: ${error.localizedMessage}"))
+                _eventFlow.emit(
+                    DetailsUiEvent.ShowToast(
+                        app.getString(R.string.msg_export_pdf_failed, error.localizedMessage ?: "")
+                    )
+                )
             }
         }
     }
@@ -158,26 +258,46 @@ class MeetingDetailsViewModel(
         val currentMeeting = meeting.value ?: return
         val file = File(currentMeeting.audioFilePath)
         if (file.exists()) {
-            ShareUtil.shareFile(getApplication(), file, "audio/m4a", currentMeeting.title)
+            ShareUtil.shareFile(app, file, "audio/mp4", currentMeeting.title)
+        } else {
+            viewModelScope.launch {
+                _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_audio_not_found)))
+            }
         }
     }
 
     fun shareText(text: String) {
         val currentMeeting = meeting.value ?: return
-        ShareUtil.shareText(getApplication(), text, currentMeeting.title)
+        ShareUtil.shareText(app, text, currentMeeting.title)
+    }
+
+    fun sharePdf(typeLabel: String, textContent: String) {
+        val currentMeeting = meeting.value ?: return
+        viewModelScope.launch {
+            val result = repository.exportPdfToCache(currentMeeting.title, typeLabel, textContent)
+            result.onSuccess { pdfFile ->
+                ShareUtil.shareFile(app, pdfFile, "application/pdf", currentMeeting.title)
+            }.onFailure { error ->
+                _eventFlow.emit(
+                    DetailsUiEvent.ShowToast(
+                        app.getString(R.string.msg_export_pdf_failed, error.localizedMessage ?: "")
+                    )
+                )
+            }
+        }
     }
 
     fun deleteTranscript() {
         viewModelScope.launch {
             repository.deleteTranscript(meetingId)
-            _eventFlow.emit(DetailsUiEvent.ShowToast("Transcript deleted."))
+            _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_transcript_deleted)))
         }
     }
 
     fun deleteProtocol() {
         viewModelScope.launch {
             repository.deleteProtocol(meetingId)
-            _eventFlow.emit(DetailsUiEvent.ShowToast("Protocol deleted."))
+            _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_protocol_deleted)))
         }
     }
 
