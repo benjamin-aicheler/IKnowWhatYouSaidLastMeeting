@@ -4,6 +4,8 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +27,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,7 +57,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MeetingDetailsScreen(
     viewModel: MeetingDetailsViewModel,
@@ -69,8 +73,11 @@ fun MeetingDetailsScreen(
     var showDeleteTranscriptDialog by remember { mutableStateOf(false) }
     var showDeleteProtocolDialog by remember { mutableStateOf(false) }
 
+    var showShareTranscriptMenu by remember { mutableStateOf(false) }
+    var showShareProtocolMenu by remember { mutableStateOf(false) }
+
     var isEditingTitle by remember { mutableStateOf(false) }
-    var titleText by remember(meeting) { mutableStateOf(meeting?.title ?: "") }
+    var titleText by remember(meeting?.title) { mutableStateOf(meeting?.title ?: "") }
 
     LaunchedEffect(Unit) {
         viewModel.eventFlow.collect { event ->
@@ -79,7 +86,7 @@ fun MeetingDetailsScreen(
                     Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
                 }
                 is DetailsUiEvent.MeetingDeleted -> {
-                    Toast.makeText(context, context.getString(R.string.action_delete_meeting), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.msg_meeting_deleted), Toast.LENGTH_SHORT).show()
                     onNavigateBack()
                 }
             }
@@ -94,7 +101,7 @@ fun MeetingDetailsScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
+                            contentDescription = stringResource(R.string.action_back)
                         )
                     }
                 },
@@ -121,6 +128,9 @@ fun MeetingDetailsScreen(
                 CircularProgressIndicator()
             }
         } else {
+            val transcriptLabel = stringResource(R.string.label_transcript)
+            val protocolLabel = stringResource(R.string.label_protocol)
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -151,7 +161,7 @@ fun MeetingDetailsScreen(
                                 },
                                 modifier = Modifier.align(Alignment.End)
                             ) {
-                                Text("Save")
+                                Text(stringResource(R.string.action_save))
                             }
                         } else {
                             Row(
@@ -168,7 +178,7 @@ fun MeetingDetailsScreen(
                                 IconButton(onClick = { isEditingTitle = true }) {
                                     Icon(
                                         imageVector = Icons.Default.Edit,
-                                        contentDescription = "Edit Title"
+                                        contentDescription = stringResource(R.string.action_edit_title)
                                     )
                                 }
                             }
@@ -176,8 +186,15 @@ fun MeetingDetailsScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
                         val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
+                        val durationSeconds = ((currentMeeting.endTime - currentMeeting.startTime) / 1000).coerceAtLeast(0L)
+                        val durationFormatted = String.format(
+                            Locale.getDefault(),
+                            "%02d:%02d",
+                            durationSeconds / 60,
+                            durationSeconds % 60
+                        )
                         Text(
-                            text = "${stringResource(R.string.label_date)}: ${dateFormat.format(Date(currentMeeting.startTime))}",
+                            text = "${stringResource(R.string.label_date)}: ${dateFormat.format(Date(currentMeeting.startTime))} • ${stringResource(R.string.label_duration)}: $durationFormatted",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -196,8 +213,9 @@ fun MeetingDetailsScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Button(onClick = { viewModel.toggleAudioPlayback() }) {
@@ -205,10 +223,14 @@ fun MeetingDetailsScreen(
                                     imageVector = if (isPlayingAudio) Icons.Default.Pause else Icons.Default.PlayArrow,
                                     contentDescription = null
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(if (isPlayingAudio) stringResource(R.string.action_pause) else stringResource(R.string.action_play))
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
+                            OutlinedButton(onClick = { viewModel.downloadAudio() }) {
+                                Icon(imageVector = Icons.Default.Download, contentDescription = null)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(stringResource(R.string.action_download_audio))
+                            }
                             OutlinedButton(onClick = { viewModel.shareAudio() }) {
                                 Icon(imageVector = Icons.Default.Share, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -268,27 +290,46 @@ fun MeetingDetailsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = stringResource(R.string.label_transcript),
+                                text = transcriptLabel,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             if (currentMeeting.transcript != null) {
                                 Row {
                                     IconButton(onClick = {
-                                        viewModel.exportPdf("Transcript", currentMeeting.transcript)
+                                        viewModel.exportPdf(transcriptLabel, currentMeeting.transcript)
                                     }) {
                                         Icon(
                                             imageVector = Icons.Default.Download,
                                             contentDescription = stringResource(R.string.action_download_transcript_pdf)
                                         )
                                     }
-                                    IconButton(onClick = {
-                                        viewModel.shareText(currentMeeting.transcript)
-                                    }) {
-                                        Icon(
-                                            imageVector = Icons.Default.Share,
-                                            contentDescription = stringResource(R.string.action_share_transcript)
-                                        )
+                                    Box {
+                                        IconButton(onClick = { showShareTranscriptMenu = true }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Share,
+                                                contentDescription = stringResource(R.string.action_share_transcript)
+                                            )
+                                        }
+                                        DropdownMenu(
+                                            expanded = showShareTranscriptMenu,
+                                            onDismissRequest = { showShareTranscriptMenu = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.action_share_as_text)) },
+                                                onClick = {
+                                                    showShareTranscriptMenu = false
+                                                    viewModel.shareText(currentMeeting.transcript)
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.action_share_as_pdf)) },
+                                                onClick = {
+                                                    showShareTranscriptMenu = false
+                                                    viewModel.sharePdf(transcriptLabel, currentMeeting.transcript)
+                                                }
+                                            )
+                                        }
                                     }
                                     IconButton(onClick = { showDeleteTranscriptDialog = true }) {
                                         Icon(
@@ -321,27 +362,46 @@ fun MeetingDetailsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = stringResource(R.string.label_protocol),
+                                text = protocolLabel,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             if (currentMeeting.protocol != null) {
                                 Row {
                                     IconButton(onClick = {
-                                        viewModel.exportPdf("Protocol", currentMeeting.protocol)
+                                        viewModel.exportPdf(protocolLabel, currentMeeting.protocol)
                                     }) {
                                         Icon(
                                             imageVector = Icons.Default.Download,
                                             contentDescription = stringResource(R.string.action_download_protocol_pdf)
                                         )
                                     }
-                                    IconButton(onClick = {
-                                        viewModel.shareText(currentMeeting.protocol)
-                                    }) {
-                                        Icon(
-                                            imageVector = Icons.Default.Share,
-                                            contentDescription = stringResource(R.string.action_share_protocol)
-                                        )
+                                    Box {
+                                        IconButton(onClick = { showShareProtocolMenu = true }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Share,
+                                                contentDescription = stringResource(R.string.action_share_protocol)
+                                            )
+                                        }
+                                        DropdownMenu(
+                                            expanded = showShareProtocolMenu,
+                                            onDismissRequest = { showShareProtocolMenu = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.action_share_as_text)) },
+                                                onClick = {
+                                                    showShareProtocolMenu = false
+                                                    viewModel.shareText(currentMeeting.protocol)
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.action_share_as_pdf)) },
+                                                onClick = {
+                                                    showShareProtocolMenu = false
+                                                    viewModel.sharePdf(protocolLabel, currentMeeting.protocol)
+                                                }
+                                            )
+                                        }
                                     }
                                     IconButton(onClick = { showDeleteProtocolDialog = true }) {
                                         Icon(

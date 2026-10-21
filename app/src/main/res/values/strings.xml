@@ -11,6 +11,13 @@
     <string name="action_record">Record</string>
     <string name="action_stop_recording">Stop Recording</string>
     <string name="recording_in_progress">Recording in progress…</string>
+    <string name="notification_channel_recording_name">Meeting Recording</string>
+    <string name="notification_channel_recording_desc">Shows active meeting recording status</string>
+    <string name="no_meetings">No meetings recorded yet. Tap Record to start.</string>
+    <string name="filter_all_dates">All Dates</string>
+    <string name="action_back">Back</string>
+    <string name="action_save">Save</string>
+    <string name="action_edit_title">Edit Title</string>
 
     <!-- Meeting Details -->
     <string name="label_title">Title</string>
@@ -28,13 +35,22 @@
     <!-- Audio Player -->
     <string name="action_play">Play</string>
     <string name="action_pause">Pause</string>
+    <string name="msg_audio_not_found">Audio file not found.</string>
+    <string name="msg_audio_play_error">Failed to play audio: %1$s</string>
 
     <!-- Export & Sharing -->
+    <string name="action_download_audio">Download Audio</string>
     <string name="action_download_transcript_pdf">Export Transcript PDF</string>
     <string name="action_download_protocol_pdf">Export Protocol PDF</string>
     <string name="action_share_audio">Share Audio</string>
     <string name="action_share_transcript">Share Transcript</string>
     <string name="action_share_protocol">Share Protocol</string>
+    <string name="action_share_as_text">Share as Text</string>
+    <string name="action_share_as_pdf">Share as PDF</string>
+    <string name="msg_exported_pdf_path">PDF exported to %1$s</string>
+    <string name="msg_export_pdf_failed">PDF export failed: %1$s</string>
+    <string name="msg_exported_audio_path">Audio saved to %1$s</string>
+    <string name="msg_export_audio_failed">Audio export failed: %1$s</string>
 
     <!-- Deletions -->
     <string name="action_delete_meeting">Delete Meeting</string>
@@ -46,11 +62,16 @@
     <string name="confirm_delete_protocol">Are you sure you want to delete the protocol?</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_delete">Delete</string>
+    <string name="msg_meeting_deleted">Meeting deleted.</string>
+    <string name="msg_transcript_deleted">Transcript deleted.</string>
+    <string name="msg_protocol_deleted">Protocol deleted.</string>
 
     <!-- AI Processing State -->
     <string name="status_transcribing">Transcribing audio via AI…</string>
     <string name="status_protocolizing">Creating protocol via AI…</string>
     <string name="msg_ai_success">AI operation completed successfully.</string>
+    <string name="msg_transcript_success">Transcript generated successfully.</string>
+    <string name="msg_protocol_success">Protocol generated successfully.</string>
     <string name="msg_ai_error">AI Error: %1$s</string>
     <string name="msg_missing_api_key">Please configure your API Key in Settings first.</string>
     <string name="msg_exported_pdf">PDF exported to Downloads/LastMeeting.</string>

@@ -14,11 +14,14 @@ import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
+import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.MainActivity
 import com.example.lastmeeting.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,7 +38,8 @@ class RecordingService : Service() {
     private val binder = LocalBinder()
     private var mediaRecorder: MediaRecorder? = null
     private var currentOutputFile: File? = null
-    private var recordingStartTime: Long = 0
+    private var recordingStartElapsedTime: Long = 0
+    private var recordingStartWallTime: Long = 0
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
@@ -43,7 +47,7 @@ class RecordingService : Service() {
     private val _elapsedTimeSeconds = MutableStateFlow(0L)
     val elapsedTimeSeconds: StateFlow<Long> = _elapsedTimeSeconds.asStateFlow()
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var timerJob: Job? = null
 
     inner class LocalBinder : Binder() {
@@ -89,14 +93,16 @@ class RecordingService : Service() {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioEncodingBitRate(128000)
-                setAudioSamplingRate(44100)
+                setAudioChannels(1)
+                setAudioEncodingBitRate(64000)
+                setAudioSamplingRate(24000)
                 setOutputFile(outputFile.absolutePath)
                 prepare()
                 start()
             }
             mediaRecorder = recorder
-            recordingStartTime = SystemClock.elapsedRealtime()
+            recordingStartElapsedTime = SystemClock.elapsedRealtime()
+            recordingStartWallTime = System.currentTimeMillis()
             _isRecording.value = true
 
             startForegroundServiceNotification()
@@ -114,6 +120,11 @@ class RecordingService : Service() {
     fun stopRecording(): File? {
         if (!_isRecording.value) return currentOutputFile
 
+        val recordedFile = currentOutputFile
+        val startTime = recordingStartWallTime
+        val endTime = System.currentTimeMillis()
+        currentOutputFile = null
+
         try {
             mediaRecorder?.apply {
                 stop()
@@ -129,7 +140,18 @@ class RecordingService : Service() {
             stopSelf()
         }
 
-        return currentOutputFile
+        if (recordedFile != null && recordedFile.exists() && recordedFile.length() > 0L) {
+            val app = application as? LastMeetingApp
+            app?.applicationScope?.launch {
+                app.meetingRepository.createMeeting(
+                    audioFile = recordedFile,
+                    startTime = startTime,
+                    endTime = endTime
+                )
+            }
+        }
+
+        return recordedFile
     }
 
     private fun cleanupRecorder() {
@@ -145,7 +167,7 @@ class RecordingService : Service() {
         timerJob?.cancel()
         timerJob = serviceScope.launch {
             while (isActive && _isRecording.value) {
-                val elapsed = (SystemClock.elapsedRealtime() - recordingStartTime) / 1000
+                val elapsed = (SystemClock.elapsedRealtime() - recordingStartElapsedTime) / 1000
                 _elapsedTimeSeconds.value = elapsed
                 updateNotification(elapsed)
                 delay(1000)
@@ -160,17 +182,15 @@ class RecordingService : Service() {
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Meeting Recording",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows active meeting recording status"
-            }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            getString(R.string.notification_channel_recording_name),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = getString(R.string.notification_channel_recording_desc)
         }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.createNotificationChannel(channel)
     }
 
     private fun buildNotification(elapsedSeconds: Long): Notification {
@@ -230,6 +250,7 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         stopRecording()
+        serviceScope.cancel()
         super.onDestroy()
     }
 

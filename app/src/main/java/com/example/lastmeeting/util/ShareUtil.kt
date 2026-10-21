@@ -22,7 +22,10 @@ object ShareUtil {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        context.startActivity(Intent.createChooser(intent, title))
+        val chooser = Intent.createChooser(intent, title).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
     }
 
     fun shareText(context: Context, text: String, title: String) {
@@ -31,6 +34,9 @@ object ShareUtil {
             putExtra(Intent.EXTRA_TEXT, text)
         }
 
-        context.startActivity(Intent.createChooser(intent, title))
+        val chooser = Intent.createChooser(intent, title).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
     }
 }

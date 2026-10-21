@@ -11,6 +11,13 @@
     <string name="action_record">Aufnehmen</string>
     <string name="action_stop_recording">Aufnahme stoppen</string>
     <string name="recording_in_progress">Aufnahme läuft…</string>
+    <string name="notification_channel_recording_name">Sitzungsaufnahme</string>
+    <string name="notification_channel_recording_desc">Zeigt den Status einer aktiven Sitzungsaufnahme an</string>
+    <string name="no_meetings">Noch keine Sitzungen aufgenommen. Tippen Sie auf Aufnehmen, um zu starten.</string>
+    <string name="filter_all_dates">Alle Tage</string>
+    <string name="action_back">Zurück</string>
+    <string name="action_save">Speichern</string>
+    <string name="action_edit_title">Titel bearbeiten</string>
 
     <!-- Meeting Details -->
     <string name="label_title">Titel</string>
@@ -28,13 +35,22 @@
     <!-- Audio Player -->
     <string name="action_play">Abspielen</string>
     <string name="action_pause">Pause</string>
+    <string name="msg_audio_not_found">Audiodatei nicht gefunden.</string>
+    <string name="msg_audio_play_error">Fehler beim Abspielen: %1$s</string>
 
     <!-- Export & Sharing -->
+    <string name="action_download_audio">Audio herunterladen</string>
     <string name="action_download_transcript_pdf">Transkript-PDF exportieren</string>
     <string name="action_download_protocol_pdf">Protokoll-PDF exportieren</string>
     <string name="action_share_audio">Audio teilen</string>
     <string name="action_share_transcript">Transkript teilen</string>
     <string name="action_share_protocol">Protokoll teilen</string>
+    <string name="action_share_as_text">Als Text teilen</string>
+    <string name="action_share_as_pdf">Als PDF teilen</string>
+    <string name="msg_exported_pdf_path">PDF gespeichert unter %1$s</string>
+    <string name="msg_export_pdf_failed">PDF-Export fehlgeschlagen: %1$s</string>
+    <string name="msg_exported_audio_path">Audio gespeichert unter %1$s</string>
+    <string name="msg_export_audio_failed">Audio-Export fehlgeschlagen: %1$s</string>
 
     <!-- Deletions -->
     <string name="action_delete_meeting">Sitzung löschen</string>
@@ -46,11 +62,16 @@
     <string name="confirm_delete_protocol">Möchten Sie das Protokoll wirklich löschen?</string>
     <string name="action_cancel">Abbrechen</string>
     <string name="action_delete">Löschen</string>
+    <string name="msg_meeting_deleted">Sitzung gelöscht.</string>
+    <string name="msg_transcript_deleted">Transkript gelöscht.</string>
+    <string name="msg_protocol_deleted">Protokoll gelöscht.</string>
 
     <!-- AI Processing State -->
     <string name="status_transcribing">Audio wird per KI transkribiert…</string>
     <string name="status_protocolizing">Protokoll wird per KI erstellt…</string>
     <string name="msg_ai_success">KI-Verarbeitung erfolgreich abgeschlossen.</string>
+    <string name="msg_transcript_success">Transkript erfolgreich erstellt.</string>
+    <string name="msg_protocol_success">Protokoll erfolgreich erstellt.</string>
     <string name="msg_ai_error">KI-Fehler: %1$s</string>
     <string name="msg_missing_api_key">Bitte konfigurieren Sie zuerst Ihren API-Schlüssel in den Einstellungen.</string>
     <string name="msg_exported_pdf">PDF wurde unter Downloads/LastMeeting gespeichert.</string>

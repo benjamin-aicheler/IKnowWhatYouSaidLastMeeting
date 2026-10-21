@@ -6,18 +6,19 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.service.RecordingService
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
 
 enum class MainViewMode {
     LIST,
@@ -48,7 +49,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _elapsedSeconds = MutableStateFlow(0L)
     val elapsedSeconds: StateFlow<Long> = _elapsedSeconds.asStateFlow()
 
-    private var recordingStartTime: Long = 0
+    private var isRecordingCollectorJob: Job? = null
+    private var elapsedCollectorJob: Job? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -57,12 +59,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             recordingService = srv
             _isRecordingServiceBound.value = true
 
-            viewModelScope.launch {
+            isRecordingCollectorJob?.cancel()
+            isRecordingCollectorJob = viewModelScope.launch {
                 srv.isRecording.collect { rec ->
                     _isRecording.value = rec
                 }
             }
-            viewModelScope.launch {
+
+            elapsedCollectorJob?.cancel()
+            elapsedCollectorJob = viewModelScope.launch {
                 srv.elapsedTimeSeconds.collect { elapsed ->
                     _elapsedSeconds.value = elapsed
                 }
@@ -70,6 +75,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
+            isRecordingCollectorJob?.cancel()
+            elapsedCollectorJob?.cancel()
             recordingService = null
             _isRecordingServiceBound.value = false
             _isRecording.value = false
@@ -102,25 +109,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val intent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START_RECORDING
         }
-        recordingStartTime = System.currentTimeMillis()
-        context.startService(intent)
-        recordingService?.startRecording()
+        ContextCompat.startForegroundService(context, intent)
     }
 
     private fun stopRecording() {
-        val context = getApplication<Application>()
-        val endTime = System.currentTimeMillis()
-        val recordedFile = recordingService?.stopRecording()
-
-        val intent = Intent(context, RecordingService::class.java).apply {
-            action = RecordingService.ACTION_STOP_RECORDING
-        }
-        context.stopService(intent)
-
-        if (recordedFile != null && recordedFile.exists()) {
-            viewModelScope.launch {
-                repository.createMeeting(recordedFile, recordingStartTime, endTime)
+        val service = recordingService
+        if (service != null) {
+            service.stopRecording()
+        } else {
+            val context = getApplication<Application>()
+            val intent = Intent(context, RecordingService::class.java).apply {
+                action = RecordingService.ACTION_STOP_RECORDING
             }
+            context.startService(intent)
         }
     }
 
