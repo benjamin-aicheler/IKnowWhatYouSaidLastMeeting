@@ -1,0 +1,36 @@
+# Dependabot keeps the Gradle version catalog (gradle/libs.versions.toml) and wrapper fresh.
+# Grouping keeps the PR noise low; every PR still runs the normal quality checks before it is merged.
+# Dependency PRs land assigned to the maintainer so they are not lost in the notification stream.
+version: 2
+
+updates:
+  # Gradle dependencies and plugins in gradle/libs.versions.toml and the Gradle wrapper.
+  # Compose, AndroidX, and Kotlinx minor/patch updates arrive as one grouped PR;
+  # major toolchain jumps (AGP, Kotlin) arrive separately because they need a real review.
+  # Security advisories come as a single group instead of one PR per advisory.
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    assignees: ["benjamin-aicheler"]
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      gradle-security:
+        patterns: ["*"]
+        applies-to: "security-updates"
+      androidx-compose-minor-patch:
+        patterns:
+          - "androidx.*"
+          - "org.jetbrains.kotlinx:*"
+        update-types: ["minor", "patch"]
+        applies-to: "version-updates"
+      gradle-minor-patch:
+        patterns: ["*"]
+        exclude-patterns:
+          - "androidx.*"
+          - "org.jetbrains.kotlinx:*"
+        update-types: ["minor", "patch"]
+        applies-to: "version-updates"
