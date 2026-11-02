@@ -91,7 +91,7 @@ class OpenAiApiClient {
                 .build()
 
             client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string() ?: ""
+                val responseBody = response.body.string()
 
                 if (!response.isSuccessful) {
                     val errorMessage = try {

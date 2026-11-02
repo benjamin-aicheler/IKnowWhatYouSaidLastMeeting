@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,7 +71,6 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,10 +143,11 @@ fun MainScreen(
                     )
                     if (isRecording) {
                         Spacer(modifier = Modifier.width(8.dp))
+                        val locale = LocalLocale.current.platformLocale
                         val mins = elapsedSeconds / 60
                         val secs = elapsedSeconds % 60
                         Text(
-                            text = String.format(Locale.getDefault(), "%02d:%02d", mins, secs),
+                            text = String.format(locale, "%02d:%02d", mins, secs),
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
@@ -246,11 +247,12 @@ fun MeetingItemCard(
     meeting: MeetingEntity,
     onClick: () -> Unit
 ) {
-    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
-    val formattedDate = remember(meeting.startTime) { dateFormat.format(Date(meeting.startTime)) }
+    val locale = LocalLocale.current.platformLocale
+    val dateFormat = remember(locale) { SimpleDateFormat("yyyy-MM-dd HH:mm", locale) }
+    val formattedDate = remember(meeting.startTime, dateFormat) { dateFormat.format(Date(meeting.startTime)) }
 
     val durationSeconds = ((meeting.endTime - meeting.startTime) / 1000).coerceAtLeast(0L)
-    val durationText = String.format(Locale.getDefault(), "%02d:%02d", durationSeconds / 60, durationSeconds % 60)
+    val durationText = String.format(locale, "%02d:%02d", durationSeconds / 60, durationSeconds % 60)
 
     Card(
         modifier = Modifier
@@ -295,9 +297,10 @@ fun CalendarViewComponent(
     onDateSelected: (String?) -> Unit,
     onMeetingClick: (Long) -> Unit
 ) {
-    val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val locale = LocalLocale.current.platformLocale
+    val dayFormat = remember(locale) { SimpleDateFormat("yyyy-MM-dd", locale) }
 
-    val groupedMeetings = remember(meetings) {
+    val groupedMeetings = remember(meetings, dayFormat) {
         meetings.groupBy { dayFormat.format(Date(it.startTime)) }
     }
 
@@ -410,7 +413,8 @@ private fun MonthCalendarCard(
     selectedDate: String?,
     onDateClick: (String) -> Unit
 ) {
-    val monthFormatter = remember { DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()) }
+    val locale = LocalLocale.current.platformLocale
+    val monthFormatter = remember(locale) { DateTimeFormatter.ofPattern("MMMM yyyy", locale) }
     val isoFormatter = remember { DateTimeFormatter.ISO_LOCAL_DATE }
     val daysOfWeek = remember {
         listOf(
@@ -456,7 +460,7 @@ private fun MonthCalendarCard(
             Row(modifier = Modifier.fillMaxWidth()) {
                 for (dow in daysOfWeek) {
                     Text(
-                        text = dow.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
+                        text = dow.getDisplayName(TextStyle.SHORT, locale),
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.labelSmall,
