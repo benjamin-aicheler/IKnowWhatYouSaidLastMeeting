@@ -34,3 +34,25 @@ updates:
           - "org.jetbrains.kotlinx:*"
         update-types: ["minor", "patch"]
         applies-to: "version-updates"
+
+  # GitHub Actions workflows in .github/workflows/.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    assignees: ["benjamin-aicheler"]
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    groups:
+      actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
