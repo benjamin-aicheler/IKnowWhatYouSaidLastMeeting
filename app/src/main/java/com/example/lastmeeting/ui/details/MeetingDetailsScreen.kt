@@ -48,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,7 +57,6 @@ import com.example.lastmeeting.R
 import com.example.lastmeeting.ui.components.DeleteConfirmationDialog
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -64,6 +65,7 @@ fun MeetingDetailsScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val meeting by viewModel.meeting.collectAsState()
     val isTranscribing by viewModel.isTranscribing.collectAsState()
     val isProtocolizing by viewModel.isProtocolizing.collectAsState()
@@ -79,14 +81,14 @@ fun MeetingDetailsScreen(
     var isEditingTitle by remember { mutableStateOf(false) }
     var titleText by remember(meeting?.title) { mutableStateOf(meeting?.title ?: "") }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(resources) {
         viewModel.eventFlow.collect { event ->
             when (event) {
                 is DetailsUiEvent.ShowToast -> {
                     Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
                 }
                 is DetailsUiEvent.MeetingDeleted -> {
-                    Toast.makeText(context, context.getString(R.string.msg_meeting_deleted), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, resources.getString(R.string.msg_meeting_deleted), Toast.LENGTH_SHORT).show()
                     onNavigateBack()
                 }
             }
@@ -185,10 +187,11 @@ fun MeetingDetailsScreen(
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
-                        val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
+                        val locale = LocalLocale.current.platformLocale
+                        val dateFormat = remember(locale) { SimpleDateFormat("yyyy-MM-dd HH:mm", locale) }
                         val durationSeconds = ((currentMeeting.endTime - currentMeeting.startTime) / 1000).coerceAtLeast(0L)
                         val durationFormatted = String.format(
-                            Locale.getDefault(),
+                            locale,
                             "%02d:%02d",
                             durationSeconds / 60,
                             durationSeconds % 60
