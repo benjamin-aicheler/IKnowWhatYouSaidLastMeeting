@@ -56,3 +56,11 @@ jobs:
           name: lint-report-debug
           path: app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
+
+      - name: Upload Debug APK
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: last-meeting-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
