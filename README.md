@@ -45,7 +45,8 @@
 - **Architecture**: MVVM with Repository pattern
 - **Database**: Room Database (local storage for meeting records)
 - **Preferences**: Jetpack DataStore Preferences (secure local API key and prompt settings)
-- **HTTP Client**: OkHttp / Ktor with `kotlinx.serialization`
+- **HTTP Client**: OkHttp 5 with `kotlinx.serialization`
+- **Background Processing**: Android Foreground Service (recording) & WorkManager (AI transcription/protocolization)
 - **PDF Generation**: Native `android.graphics.pdf.PdfDocument` & `MediaStore`
 
 ---
@@ -54,8 +55,9 @@
 
 ### Prerequisites
 
-- **Android Studio**: Ladybug / 2024.2.1 or newer
+- **Android Studio**: Latest version with Android Gradle Plugin (AGP) 9.5+ support
 - **JDK**: Java 17 or Java 21
+- **Android SDK**: `compileSdk = 37`, `targetSdk = 36`, `minSdk = 26`
 - **Android Device / Emulator**: Android 8.0 (API level 26) or higher
 
 ### Building the App
