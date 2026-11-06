@@ -87,7 +87,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             errorCollectorJob?.cancel()
             errorCollectorJob = viewModelScope.launch {
-                _recordingError.value = srv.startupError.filterNotNull().first()
+                val error = srv.startupError.filterNotNull().first()
+                // Consume at the source: the service outlives this binding, and a later
+                // observer must not receive a failure it already reported.
+                srv.clearStartupError()
+                _recordingError.value = error
                 // stopSelf cannot destroy a service held by BIND_AUTO_CREATE.
                 // Release the binding even when foreground promotion itself failed.
                 unbindRecordingService()

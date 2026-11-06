@@ -53,6 +53,11 @@ class RecordingService : Service() {
     private val _startupError = MutableStateFlow<Int?>(null)
     val startupError: StateFlow<Int?> = _startupError.asStateFlow()
 
+    /** Clears the last startup failure once a client has reported it, so it is not replayed. */
+    fun clearStartupError() {
+        _startupError.value = null
+    }
+
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var timerJob: Job? = null
 
