@@ -3,6 +3,7 @@ package com.example.lastmeeting.ui.main
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -45,6 +46,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -80,10 +83,19 @@ fun MainScreen(
     onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val meetings by viewModel.meetings.collectAsState()
     val viewMode by viewModel.viewMode.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val elapsedSeconds by viewModel.elapsedSeconds.collectAsState()
+    val recordingError by viewModel.recordingError.collectAsState()
+
+    LaunchedEffect(recordingError, resources) {
+        recordingError?.let { message ->
+            Toast.makeText(context, resources.getString(message), Toast.LENGTH_LONG).show()
+            viewModel.clearRecordingError()
+        }
+    }
 
     var selectedCalendarDate by remember { mutableStateOf<String?>(null) }
 
