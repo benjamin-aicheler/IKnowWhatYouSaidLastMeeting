@@ -139,7 +139,14 @@ class RecordingService : Service() {
     }
 
     fun stopRecording(): File? {
-        if (!_isRecording.value) return currentOutputFile
+        if (!_isRecording.value) {
+            // An idle stop command (double tap, stale notification action) must not leave a
+            // started service behind. onDestroy reaches this path as well, where both calls
+            // are no-ops.
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return currentOutputFile
+        }
 
         val recordedFile = currentOutputFile
         val startTime = recordingStartWallTime
