@@ -76,5 +76,16 @@
    - Follow Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`
    - Keep commits small, atomic, and focused.
 3. **Build & Pull Requests**:
-   - Verify build locally (`./gradlew assembleDebug` or `./gradlew build`) before pushing.
+   - Verify build locally before pushing. On the configured Linux ARM host use `lastmeeting-build assembleDebug` (see section 3); elsewhere use `./gradlew assembleDebug` or `./gradlew build`.
    - Push branch (`git push -u origin <branch-name>`) and create PR (`gh pr create`).
+
+## 3. Local Build Environment
+
+- **JDK**: Java 21 is required by `gradle/gradle-daemon-jvm.properties`. The configured Raspberry Pi has system OpenJDK 21 installed; `JAVA_HOME` need not be set when it is available on `PATH`.
+- **Configured Linux ARM host**: Use `lastmeeting-build` from any directory for the APK, unit tests, and lint. Pass Gradle arguments for narrower checks, e.g. `lastmeeting-build assembleDebug` or `lastmeeting-build testDebugUnitTest`.
+- **Repository helper**: `./scripts/build-local.sh` provides the same default checks and loads the local build profile. See the README's Local Linux ARM Builds section if the user-local command is unavailable.
+- **Local profile**: `~/.config/lastmeeting/build.env` supplies SDK/cache paths, the AAPT2 override, and the worker limit. The repository helper also supports `LAST_MEETING_BUILD_CONFIG` and `XDG_CONFIG_HOME`.
+- **Permanent locations on the configured host**: SDK at `~/.local/share/android-sdk`, Gradle cache at `~/.gradle`, and QEMU/AAPT2 plus x86 runtime libraries at `~/.local/share/lastmeeting-build`. The AAPT2 wrapper's executable filename must be `aapt2`.
+- Reuse the installed Java and ARM tooling. Inspect the profile and existing tools before downloading or provisioning replacements. Keep machine-specific profiles and binaries outside Git.
+- Keep SDKs, emulators, runtime libraries, and caches outside `/tmp` and project `build/` directories; they must survive reboots and `gradlew clean`.
+- Prefer incremental builds. Run `clean` only when a failure or task specifically warrants it. When troubleshooting, run the failing Gradle task separately so its error is reported promptly.
