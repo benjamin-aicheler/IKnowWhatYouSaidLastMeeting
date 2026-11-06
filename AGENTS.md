@@ -84,7 +84,7 @@
 - **JDK**: Java 21 is required by `gradle/gradle-daemon-jvm.properties`. A system OpenJDK 21 on `PATH` is enough; set `JAVA_HOME` only when several JDKs are installed.
 - **Android SDK**: Point `ANDROID_HOME` at the installed SDK or set `sdk.dir` in an untracked `local.properties`. Keep the SDK outside `/tmp` and the project's `build/` directory so it survives `gradlew clean`.
 - **Gradle cache**: `GRADLE_USER_HOME` defaults to `~/.gradle`; keep the distribution and dependency caches there so builds stay incremental across checkouts.
-- **Repository helper**: `./scripts/build-local.sh` forwards its arguments to the Gradle wrapper and runs `assembleDebug testDebugUnitTest lintDebug` when called without arguments. It works from any directory and sources an optional profile at `~/.config/lastmeeting/build.env` (override with `LAST_MEETING_BUILD_CONFIG`).
-- **Local profile**: put machine-specific values such as `ANDROID_HOME` or `GRADLE_USER_HOME` in that profile. Do not commit it or the tool binaries it points to.
+- **Repository helper**: `./scripts/build-local.sh` forwards its arguments to the Gradle wrapper and runs `assembleDebug testDebugUnitTest lintDebug` when called without arguments. It works from any directory and sources an optional profile at `.build.env` in the checkout root.
+- **Local profile**: put machine-specific values such as `ANDROID_HOME` or `GRADLE_USER_HOME` in `.build.env`. It is git-ignored; do not commit it or the tool binaries it points to.
 - AGP resolves its own `aapt2` artifact per host architecture, so no resource-compiler override is needed on Linux ARM64 or x86_64.
 - Prefer incremental builds; run `clean` only when a failure or task warrants it, and run the failing Gradle task alone when troubleshooting.

@@ -77,8 +77,8 @@
 
 `./scripts/build-local.sh` forwards its arguments to the Gradle wrapper and, without
 arguments, runs `assembleDebug testDebugUnitTest lintDebug`. It works from any
-directory and sources an optional machine-specific profile at
-`~/.config/lastmeeting/build.env` (override with `LAST_MEETING_BUILD_CONFIG`):
+directory and sources an optional machine-specific profile at `.build.env` in the
+checkout root:
 
 ```bash
 export ANDROID_HOME="$HOME/.local/share/android-sdk"
