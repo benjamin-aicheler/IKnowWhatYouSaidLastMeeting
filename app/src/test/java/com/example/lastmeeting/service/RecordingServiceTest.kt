@@ -141,6 +141,15 @@ class RecordingServiceTest {
     }
 
     @Test
+    fun idleStopCommandStopsTheService() {
+        startCommand(RecordingService.ACTION_STOP_RECORDING)
+        assertFalse(service.isRecording.value)
+        assertTrue(shadowOf(service).isStoppedBySelf)
+        assertNull(shadowOf(service).lastForegroundNotification)
+        assertTrue(service.getSystemService(NotificationManager::class.java).activeNotifications.isEmpty())
+    }
+
+    @Test
     fun failedStartupPreservesExistingRecordings() {
         val directory = File(service.filesDir, "recordings").apply { mkdirs() }
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -173,9 +182,9 @@ class RecordingServiceTest {
         assertTrue(service.getSystemService(NotificationManager::class.java).activeNotifications.isEmpty())
     }
 
-    private fun startCommand() {
+    private fun startCommand(action: String = RecordingService.ACTION_START_RECORDING) {
         val intent = Intent(service, RecordingService::class.java)
-            .setAction(RecordingService.ACTION_START_RECORDING)
+            .setAction(action)
         service.onStartCommand(intent, 0, 1)
     }
 
