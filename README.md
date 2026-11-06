@@ -85,7 +85,13 @@ export ANDROID_HOME="$HOME/.local/share/android-sdk"
 export GRADLE_USER_HOME="$HOME/.gradle"
 export LAST_MEETING_AAPT2="$HOME/.local/share/lastmeeting-build/bin/aapt2"
 export LAST_MEETING_GRADLE_MAX_WORKERS=2
+export LAST_MEETING_PROJECT_DIR="$HOME/source/IKnowWhatYouSaidLastMeeting"
 ```
+
+Set `LAST_MEETING_PROJECT_DIR` to your actual checkout directory. On the configured
+host, the installed user-local `lastmeeting-build` launcher requires it to locate
+the project from any working directory. The repository's `scripts/build-local.sh`
+finds the checkout from its own location and does not require this variable.
 
 The `aapt2` executable can be a wrapper that invokes QEMU with an x86 Linux
 runtime and the native Android resource compiler. Its filename must be `aapt2`.

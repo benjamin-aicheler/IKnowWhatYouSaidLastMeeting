@@ -85,6 +85,7 @@
 - **Configured Linux ARM host**: Use `lastmeeting-build` from any directory for the APK, unit tests, and lint. Pass Gradle arguments for narrower checks, e.g. `lastmeeting-build assembleDebug` or `lastmeeting-build testDebugUnitTest`.
 - **Repository helper**: `./scripts/build-local.sh` provides the same default checks and loads the local build profile. See the README's Local Linux ARM Builds section if the user-local command is unavailable.
 - **Local profile**: `~/.config/lastmeeting/build.env` supplies SDK/cache paths, the AAPT2 override, and the worker limit. The repository helper also supports `LAST_MEETING_BUILD_CONFIG` and `XDG_CONFIG_HOME`.
+- **Checkout path**: The installed user-local `lastmeeting-build` launcher requires `LAST_MEETING_PROJECT_DIR` in that profile, set to the actual checkout directory. The repository helper locates its own checkout and does not require this variable.
 - **Permanent locations on the configured host**: SDK at `~/.local/share/android-sdk`, Gradle cache at `~/.gradle`, and QEMU/AAPT2 plus x86 runtime libraries at `~/.local/share/lastmeeting-build`. The AAPT2 wrapper's executable filename must be `aapt2`.
 - Reuse the installed Java and ARM tooling. Inspect the profile and existing tools before downloading or provisioning replacements. Keep machine-specific profiles and binaries outside Git.
 - Keep SDKs, emulators, runtime libraries, and caches outside `/tmp` and project `build/` directories; they must survive reboots and `gradlew clean`.
