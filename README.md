@@ -56,7 +56,7 @@
 ### Prerequisites
 
 - **Android Studio**: Latest version with Android Gradle Plugin (AGP) 9.5+ support
-- **JDK**: Java 17 or Java 21
+- **JDK**: Java 21 (required by the Gradle daemon toolchain configuration)
 - **Android SDK**: `compileSdk = 37`, `targetSdk = 36`, `minSdk = 26`
 - **Android Device / Emulator**: Android 8.0 (API level 26) or higher
 
@@ -72,6 +72,37 @@
    ```bash
    ./gradlew assembleDebug
    ```
+
+### Local Linux ARM Builds
+
+Linux ARM hosts need an ARM-compatible resource compiler or an emulated x86 AAPT2
+compiler. Once those tools and the SDK are provisioned, put the machine-specific
+settings in `~/.config/lastmeeting/build.env` (or set `LAST_MEETING_BUILD_CONFIG`
+to another shell profile):
+
+```bash
+export ANDROID_HOME="$HOME/.local/share/android-sdk"
+export GRADLE_USER_HOME="$HOME/.gradle"
+export LAST_MEETING_AAPT2="$HOME/.local/share/lastmeeting-build/bin/aapt2"
+export LAST_MEETING_GRADLE_MAX_WORKERS=2
+```
+
+The `aapt2` executable can be a wrapper that invokes QEMU with an x86 Linux
+runtime and the native Android resource compiler. Its filename must be `aapt2`.
+Keep the SDK, emulator, runtime libraries, and Gradle cache outside `/tmp` and
+the repository's `build/` directories so they survive reboots and `gradlew clean`.
+This profile is local to the machine; do not commit it or its tool binaries.
+
+Use the helper to load the profile and build with the project's Gradle wrapper:
+
+```bash
+./scripts/build-local.sh                    # APK, unit tests, and lint
+./scripts/build-local.sh assembleDebug      # APK only
+./scripts/build-local.sh clean assembleDebug
+```
+
+Arguments are forwarded to Gradle, and the helper works from any working directory.
+On other hosts without an AAPT2 override, it uses the standard Gradle configuration.
 
 ---
 
