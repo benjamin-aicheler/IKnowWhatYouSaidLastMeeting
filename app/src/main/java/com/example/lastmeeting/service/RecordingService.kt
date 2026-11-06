@@ -1,5 +1,6 @@
 package com.example.lastmeeting.service
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,13 +8,14 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.media.MediaRecorder
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.MainActivity
 import com.example.lastmeeting.R
@@ -36,7 +38,8 @@ import java.util.Locale
 class RecordingService : Service() {
 
     private val binder = LocalBinder()
-    private var mediaRecorder: MediaRecorder? = null
+    private var mediaRecorder: AudioRecorder? = null
+    internal var recorderFactory: () -> AudioRecorder = { AndroidAudioRecorder(this) }
     private var currentOutputFile: File? = null
     private var recordingStartElapsedTime: Long = 0
     private var recordingStartWallTime: Long = 0
@@ -46,6 +49,9 @@ class RecordingService : Service() {
 
     private val _elapsedTimeSeconds = MutableStateFlow(0L)
     val elapsedTimeSeconds: StateFlow<Long> = _elapsedTimeSeconds.asStateFlow()
+
+    private val _startupError = MutableStateFlow<Int?>(null)
+    val startupError: StateFlow<Int?> = _startupError.asStateFlow()
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var timerJob: Job? = null
@@ -71,48 +77,58 @@ class RecordingService : Service() {
 
     fun startRecording(): File? {
         if (_isRecording.value) return currentOutputFile
-
-        val recordingsDir = File(filesDir, "recordings")
-        if (!recordingsDir.exists()) {
-            recordingsDir.mkdirs()
-        }
-
-        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val outputFile = File(recordingsDir, "meeting_$timeStamp.m4a")
-        currentOutputFile = outputFile
+        _startupError.value = null
 
         try {
-            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(this)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                throw SecurityException("Microphone permission is required")
             }
+            // Satisfy the foreground deadline before any file or recorder operations.
+            startForegroundServiceNotification()
 
+            val recordingsDir = File(filesDir, "recordings")
+            check(recordingsDir.isDirectory || recordingsDir.mkdirs()) { "Cannot create recordings directory" }
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            // A failed retry or rapid stop/start must never overwrite another recording.
+            val timestampFile = File(recordingsDir, "meeting_$timeStamp.m4a")
+            val outputFile = if (timestampFile.createNewFile()) timestampFile else {
+                File.createTempFile("meeting_${timeStamp}_", ".m4a", recordingsDir)
+            }
+            currentOutputFile = outputFile
+
+            val recorder = recorderFactory()
+            // Retain ownership before configuration or prepare/start can throw.
+            mediaRecorder = recorder
             recorder.apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioChannels(1)
-                setAudioEncodingBitRate(64000)
-                setAudioSamplingRate(24000)
-                setOutputFile(outputFile.absolutePath)
+                configure(outputFile)
                 prepare()
                 start()
             }
-            mediaRecorder = recorder
             recordingStartElapsedTime = SystemClock.elapsedRealtime()
             recordingStartWallTime = System.currentTimeMillis()
             _isRecording.value = true
 
-            startForegroundServiceNotification()
+            updateNotification(0L)
             startTimer()
 
             return outputFile
         } catch (e: Exception) {
             e.printStackTrace()
             cleanupRecorder()
+            currentOutputFile?.delete()
+            currentOutputFile = null
             _isRecording.value = false
+            recordingStartElapsedTime = 0L
+            recordingStartWallTime = 0L
+            stopTimer()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            // Retained state lets a late binding observe the failure, too.
+            _startupError.value = if (e is SecurityException) {
+                R.string.msg_recording_permission_required
+            } else {
+                R.string.msg_recording_start_failed
+            }
+            stopSelf()
             return null
         }
     }
@@ -126,14 +142,11 @@ class RecordingService : Service() {
         currentOutputFile = null
 
         try {
-            mediaRecorder?.apply {
-                stop()
-                release()
-            }
+            mediaRecorder?.stop()
         } catch (e: Exception) {
             e.printStackTrace()
         } finally {
-            mediaRecorder = null
+            cleanupRecorder()
             _isRecording.value = false
             stopTimer()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -193,7 +206,7 @@ class RecordingService : Service() {
         manager?.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(elapsedSeconds: Long): Notification {
+    private fun buildNotification(elapsedSeconds: Long, preparing: Boolean = false): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
@@ -217,8 +230,8 @@ class RecordingService : Service() {
         val timeString = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.recording_in_progress))
-            .setContentText(timeString)
+            .setContentTitle(getString(if (preparing) R.string.recording_preparing else R.string.recording_in_progress))
+            .setContentText(if (preparing) null else timeString)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -231,7 +244,7 @@ class RecordingService : Service() {
     }
 
     private fun startForegroundServiceNotification() {
-        val notification = buildNotification(0L)
+        val notification = buildNotification(0L, preparing = true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             startForeground(
                 NOTIFICATION_ID,

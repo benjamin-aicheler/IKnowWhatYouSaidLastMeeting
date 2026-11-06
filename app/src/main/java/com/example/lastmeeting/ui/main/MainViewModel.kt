@@ -1,15 +1,18 @@
 package com.example.lastmeeting.ui.main
 
+import android.Manifest
 import android.app.Application
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.os.IBinder
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.lastmeeting.LastMeetingApp
+import com.example.lastmeeting.R
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.service.RecordingService
 import kotlinx.coroutines.Job
@@ -17,6 +20,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -41,7 +46,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val viewMode: StateFlow<MainViewMode> = _viewMode.asStateFlow()
 
     private var recordingService: RecordingService? = null
-    private val _isRecordingServiceBound = MutableStateFlow(false)
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
@@ -51,13 +55,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var isRecordingCollectorJob: Job? = null
     private var elapsedCollectorJob: Job? = null
+    private var errorCollectorJob: Job? = null
+    private var bindingRequested = false
+
+    private val _recordingError = MutableStateFlow<Int?>(null)
+    val recordingError: StateFlow<Int?> = _recordingError.asStateFlow()
+
+    fun clearRecordingError() {
+        _recordingError.value = null
+    }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as RecordingService.LocalBinder
             val srv = binder.getService()
             recordingService = srv
-            _isRecordingServiceBound.value = true
 
             isRecordingCollectorJob?.cancel()
             isRecordingCollectorJob = viewModelScope.launch {
@@ -72,13 +84,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _elapsedSeconds.value = elapsed
                 }
             }
+
+            errorCollectorJob?.cancel()
+            errorCollectorJob = viewModelScope.launch {
+                _recordingError.value = srv.startupError.filterNotNull().first()
+                // stopSelf cannot destroy a service held by BIND_AUTO_CREATE.
+                // Release the binding even when foreground promotion itself failed.
+                unbindRecordingService()
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
             isRecordingCollectorJob?.cancel()
             elapsedCollectorJob?.cancel()
+            errorCollectorJob?.cancel()
             recordingService = null
-            _isRecordingServiceBound.value = false
             _isRecording.value = false
         }
     }
@@ -92,8 +112,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun bindRecordingService() {
+        if (bindingRequested) return
         val intent = Intent(getApplication(), RecordingService::class.java)
-        getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        bindingRequested = getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    private fun unbindRecordingService() {
+        if (bindingRequested) {
+            getApplication<Application>().unbindService(serviceConnection)
+            bindingRequested = false
+        }
+        isRecordingCollectorJob?.cancel()
+        elapsedCollectorJob?.cancel()
+        errorCollectorJob?.cancel()
+        recordingService = null
+        _isRecording.value = false
+        _elapsedSeconds.value = 0L
     }
 
     fun toggleRecording() {
@@ -106,10 +140,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startRecording() {
         val context = getApplication<Application>()
+        _recordingError.value = null
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            _recordingError.value = R.string.msg_recording_permission_required
+            return
+        }
         val intent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START_RECORDING
         }
-        ContextCompat.startForegroundService(context, intent)
+        try {
+            bindRecordingService()
+            ContextCompat.startForegroundService(context, intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            _recordingError.value = if (e is SecurityException) {
+                R.string.msg_recording_permission_required
+            } else {
+                R.string.msg_recording_start_failed
+            }
+            unbindRecordingService()
+        }
     }
 
     private fun stopRecording() {
@@ -126,13 +176,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        if (_isRecordingServiceBound.value) {
-            try {
-                getApplication<Application>().unbindService(serviceConnection)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
+        unbindRecordingService()
         super.onCleared()
     }
 }
