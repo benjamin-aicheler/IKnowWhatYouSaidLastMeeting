@@ -56,7 +56,7 @@
 ### Prerequisites
 
 - **Android Studio**: Latest version with Android Gradle Plugin (AGP) 9.5+ support
-- **JDK**: Java 17 or Java 21
+- **JDK**: Java 21 (required by the Gradle daemon toolchain configuration)
 - **Android SDK**: `compileSdk = 37`, `targetSdk = 36`, `minSdk = 26`
 - **Android Device / Emulator**: Android 8.0 (API level 26) or higher
 
@@ -72,6 +72,27 @@
    ```bash
    ./gradlew assembleDebug
    ```
+
+### Local Build Helper
+
+`./scripts/build-local.sh` forwards its arguments to the Gradle wrapper and, without
+arguments, runs `assembleDebug testDebugUnitTest lintDebug`. It works from any
+directory and sources an optional machine-specific profile at
+`~/.config/lastmeeting/build.env` (override with `LAST_MEETING_BUILD_CONFIG`):
+
+```bash
+export ANDROID_HOME="$HOME/.local/share/android-sdk"
+export GRADLE_USER_HOME="$HOME/.gradle"
+```
+
+`ANDROID_HOME` and `GRADLE_USER_HOME` are standard Gradle settings, so the profile is
+optional when your shell already exports them. Alternatively, set `sdk.dir` in an
+untracked `local.properties` inside the checkout. Keep the profile out of Git.
+
+```bash
+./scripts/build-local.sh                    # APK, unit tests, and lint
+./scripts/build-local.sh assembleDebug      # APK only
+```
 
 ---
 
