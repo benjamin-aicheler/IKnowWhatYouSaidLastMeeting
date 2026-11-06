@@ -57,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -82,15 +83,16 @@ fun MainScreen(
     onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val meetings by viewModel.meetings.collectAsState()
     val viewMode by viewModel.viewMode.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val elapsedSeconds by viewModel.elapsedSeconds.collectAsState()
     val recordingError by viewModel.recordingError.collectAsState()
 
-    LaunchedEffect(recordingError) {
+    LaunchedEffect(recordingError, resources) {
         recordingError?.let { message ->
-            Toast.makeText(context, context.getString(message), Toast.LENGTH_LONG).show()
+            Toast.makeText(context, resources.getString(message), Toast.LENGTH_LONG).show()
             viewModel.clearRecordingError()
         }
     }

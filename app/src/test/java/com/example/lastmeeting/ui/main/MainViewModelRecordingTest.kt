@@ -72,8 +72,12 @@ class MainViewModelRecordingTest {
         viewModel.toggleRecording()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(1, shadowOf(app).boundServiceConnections.size)
-        assertEquals(RecordingService.ACTION_START_RECORDING,
-            checkNotNull(shadowOf(app).nextStartedService).action)
+        // Robolectric records bind intents in the started-service queue as well.
+        val recordingStarts = generateSequence { shadowOf(app).nextStartedService }
+            .filter { it.action == RecordingService.ACTION_START_RECORDING }
+            .toList()
+        assertEquals(1, recordingStarts.size)
+        assertEquals(ComponentName(app, RecordingService::class.java), recordingStarts.single().component)
     }
 
     @Test
