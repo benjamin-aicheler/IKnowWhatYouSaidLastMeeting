@@ -42,7 +42,11 @@ internal data class ApiErrorDetail(
     val message: String? = null
 )
 
-class OpenAiApiClient {
+class OpenAiApiClient(
+    connectTimeoutSeconds: Long = 60,
+    readTimeoutSeconds: Long = 300,
+    writeTimeoutSeconds: Long = 120
+) {
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -50,9 +54,9 @@ class OpenAiApiClient {
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
-        .writeTimeout(120, TimeUnit.SECONDS)
+        .connectTimeout(connectTimeoutSeconds, TimeUnit.SECONDS)
+        .readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
+        .writeTimeout(writeTimeoutSeconds, TimeUnit.SECONDS)
         .build()
 
     suspend fun generateFromAudio(

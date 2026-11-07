@@ -113,7 +113,7 @@ class RecordingService : Service() {
             recordingStartWallTime = System.currentTimeMillis()
             _isRecording.value = true
 
-            updateNotification(0L)
+            updateNotification()
             startTimer()
 
             return outputFile
@@ -192,9 +192,9 @@ class RecordingService : Service() {
         timerJob?.cancel()
         timerJob = serviceScope.launch {
             while (isActive && _isRecording.value) {
-                val elapsed = (SystemClock.elapsedRealtime() - recordingStartElapsedTime) / 1000
-                _elapsedTimeSeconds.value = elapsed
-                updateNotification(elapsed)
+                // The notification ticks itself via a chronometer; only the UI value is
+                // refreshed here, so recording does not re-post a notification every second.
+                _elapsedTimeSeconds.value = (SystemClock.elapsedRealtime() - recordingStartElapsedTime) / 1000
                 delay(1000)
             }
         }
@@ -218,7 +218,7 @@ class RecordingService : Service() {
         manager?.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(elapsedSeconds: Long, preparing: Boolean = false): Notification {
+    private fun buildNotification(preparing: Boolean = false): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
@@ -237,16 +237,21 @@ class RecordingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val minutes = elapsedSeconds / 60
-        val seconds = elapsedSeconds % 60
-        val timeString = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(if (preparing) R.string.recording_preparing else R.string.recording_in_progress))
-            .setContentText(if (preparing) null else timeString)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .apply {
+                if (preparing) {
+                    setShowWhen(false)
+                } else {
+                    // The system ticks the elapsed time itself, so the notification is posted once.
+                    setUsesChronometer(true)
+                    setWhen(recordingStartWallTime)
+                }
+            }
             .addAction(
                 android.R.drawable.ic_media_pause,
                 getString(R.string.action_stop_recording),
@@ -256,7 +261,7 @@ class RecordingService : Service() {
     }
 
     private fun startForegroundServiceNotification() {
-        val notification = buildNotification(0L, preparing = true)
+        val notification = buildNotification(preparing = true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             startForeground(
                 NOTIFICATION_ID,
@@ -268,9 +273,9 @@ class RecordingService : Service() {
         }
     }
 
-    private fun updateNotification(elapsedSeconds: Long) {
+    private fun updateNotification() {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        manager?.notify(NOTIFICATION_ID, buildNotification(elapsedSeconds))
+        manager?.notify(NOTIFICATION_ID, buildNotification())
     }
 
     override fun onDestroy() {

@@ -5,6 +5,7 @@ import com.example.lastmeeting.R
 import com.example.lastmeeting.data.api.OpenAiApiClient
 import com.example.lastmeeting.data.db.MeetingDao
 import com.example.lastmeeting.data.db.MeetingEntity
+import com.example.lastmeeting.data.preferences.ApiSettings
 import com.example.lastmeeting.data.preferences.SettingsRepository
 import com.example.lastmeeting.util.PdfExporter
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +51,17 @@ class MeetingRepository(
         }
     }
 
-    suspend fun transcribeMeeting(id: Long): Result<String> {
+    suspend fun transcribeMeeting(id: Long): Result<String> =
+        generateForMeeting(id, ApiSettings::transcriptionPrompt, meetingDao::updateTranscript)
+
+    suspend fun protocolizeMeeting(id: Long): Result<String> =
+        generateForMeeting(id, ApiSettings::protocolPrompt, meetingDao::updateProtocol)
+
+    private suspend fun generateForMeeting(
+        id: Long,
+        promptOf: (ApiSettings) -> String,
+        store: suspend (Long, String) -> Unit
+    ): Result<String> {
         val meeting = meetingDao.getMeetingByIdDirect(id)
             ?: return Result.failure(Exception("Meeting not found."))
 
@@ -68,40 +79,11 @@ class MeetingRepository(
             baseUrl = settings.baseUrl,
             apiKey = settings.apiKey,
             model = settings.model,
-            prompt = settings.transcriptionPrompt,
+            prompt = promptOf(settings),
             audioFile = audioFile
         )
 
-        return result.onSuccess { transcriptText ->
-            meetingDao.updateTranscript(id, transcriptText)
-        }
-    }
-
-    suspend fun protocolizeMeeting(id: Long): Result<String> {
-        val meeting = meetingDao.getMeetingByIdDirect(id)
-            ?: return Result.failure(Exception("Meeting not found."))
-
-        val audioFile = File(meeting.audioFilePath)
-        if (!audioFile.exists()) {
-            return Result.failure(Exception(context.getString(R.string.msg_audio_not_found)))
-        }
-
-        val settings = settingsRepository.settingsFlow.first()
-        if (settings.apiKey.isBlank()) {
-            return Result.failure(Exception(context.getString(R.string.msg_missing_api_key)))
-        }
-
-        val result = apiClient.generateFromAudio(
-            baseUrl = settings.baseUrl,
-            apiKey = settings.apiKey,
-            model = settings.model,
-            prompt = settings.protocolPrompt,
-            audioFile = audioFile
-        )
-
-        return result.onSuccess { protocolText ->
-            meetingDao.updateProtocol(id, protocolText)
-        }
+        return result.onSuccess { text -> store(id, text) }
     }
 
     suspend fun deleteTranscript(id: Long) {
