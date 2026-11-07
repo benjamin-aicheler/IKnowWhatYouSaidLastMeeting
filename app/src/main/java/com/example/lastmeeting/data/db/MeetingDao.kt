@@ -4,7 +4,6 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -21,9 +20,6 @@ interface MeetingDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMeeting(meeting: MeetingEntity): Long
-
-    @Update
-    suspend fun updateMeeting(meeting: MeetingEntity)
 
     @Query("UPDATE meetings SET title = :title WHERE id = :id")
     suspend fun updateTitle(id: Long, title: String)
