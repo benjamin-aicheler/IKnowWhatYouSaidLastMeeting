@@ -66,6 +66,7 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_delete">Delete</string>
     <string name="msg_meeting_deleted">Meeting deleted.</string>
+    <string name="msg_delete_failed">Could not delete the audio file. The meeting was not removed.</string>
     <string name="msg_transcript_deleted">Transcript deleted.</string>
     <string name="msg_protocol_deleted">Protocol deleted.</string>
 

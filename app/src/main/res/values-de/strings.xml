@@ -66,6 +66,7 @@
     <string name="action_cancel">Abbrechen</string>
     <string name="action_delete">Löschen</string>
     <string name="msg_meeting_deleted">Sitzung gelöscht.</string>
+    <string name="msg_delete_failed">Die Audiodatei konnte nicht gelöscht werden. Die Sitzung wurde nicht entfernt.</string>
     <string name="msg_transcript_deleted">Transkript gelöscht.</string>
     <string name="msg_protocol_deleted">Protokoll gelöscht.</string>
 
