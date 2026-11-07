@@ -44,7 +44,7 @@
 - **Navigation**: Jetpack Navigation Compose
 - **Architecture**: MVVM with Repository pattern
 - **Database**: Room Database (local storage for meeting records)
-- **Preferences**: Jetpack DataStore Preferences (secure local API key and prompt settings)
+- **Preferences**: Jetpack DataStore Preferences (API key and prompt settings in app-private storage, excluded from cloud backup and device transfer — the key is stored unencrypted)
 - **HTTP Client**: OkHttp 5 with `kotlinx.serialization`
 - **Background Processing**: Android Foreground Service (recording) & WorkManager (AI transcription/protocolization)
 - **PDF Generation**: Native `android.graphics.pdf.PdfDocument` & `MediaStore`
