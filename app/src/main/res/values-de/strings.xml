@@ -59,6 +59,7 @@
     <string name="msg_export_pdf_failed">PDF-Export fehlgeschlagen: %1$s</string>
     <string name="msg_exported_audio_path">Audio gespeichert unter %1$s</string>
     <string name="msg_export_audio_failed">Audio-Export fehlgeschlagen: %1$s</string>
+    <string name="msg_storage_permission_required">Für das Speichern in Downloads ist die Speicherberechtigung erforderlich. Bitte erlauben Sie den Zugriff und versuchen Sie es erneut.</string>
 
     <!-- Deletions -->
     <string name="action_delete_meeting">Sitzung löschen</string>
