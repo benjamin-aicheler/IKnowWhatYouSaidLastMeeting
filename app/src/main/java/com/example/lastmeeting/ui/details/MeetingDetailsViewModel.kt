@@ -97,22 +97,25 @@ class MeetingDetailsViewModel(
     ) {
         viewModelScope.launch {
             workFlow.collect { infos ->
-                val info = infos.firstOrNull() ?: return@collect
-                if (!info.state.isFinished) {
-                    observedActiveWorkIds.add(info.id)
-                } else if (observedActiveWorkIds.remove(info.id)) {
-                    when (info.state) {
-                        WorkInfo.State.SUCCEEDED -> {
-                            _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(successMessageRes)))
+                // Every run of the unique work is reported, not just the oldest one: a kept
+                // previous run would otherwise mask the completion of a newer one.
+                infos.forEach { info ->
+                    if (!info.state.isFinished) {
+                        observedActiveWorkIds.add(info.id)
+                    } else if (observedActiveWorkIds.remove(info.id)) {
+                        when (info.state) {
+                            WorkInfo.State.SUCCEEDED -> {
+                                _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(successMessageRes)))
+                            }
+                            WorkInfo.State.FAILED -> {
+                                val errorMsg = info.outputData.getString(AiProcessingWorker.KEY_ERROR_MESSAGE)
+                                    ?: "Unknown error"
+                                _eventFlow.emit(
+                                    DetailsUiEvent.ShowToast(app.getString(R.string.msg_ai_error, errorMsg))
+                                )
+                            }
+                            else -> Unit
                         }
-                        WorkInfo.State.FAILED -> {
-                            val errorMsg = info.outputData.getString(AiProcessingWorker.KEY_ERROR_MESSAGE)
-                                ?: "Unknown error"
-                            _eventFlow.emit(
-                                DetailsUiEvent.ShowToast(app.getString(R.string.msg_ai_error, errorMsg))
-                            )
-                        }
-                        else -> Unit
                     }
                 }
             }
