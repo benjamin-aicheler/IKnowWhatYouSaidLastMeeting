@@ -30,6 +30,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -75,7 +78,7 @@ class RecordingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_RECORDING -> startRecording()
-            ACTION_STOP_RECORDING -> stopRecording()
+            ACTION_STOP_RECORDING -> requestStop()
         }
         return START_NOT_STICKY
     }
@@ -138,7 +141,12 @@ class RecordingService : Service() {
         }
     }
 
-    fun stopRecording(): File? {
+    /** Stops the recording without blocking the caller; finalization runs in the service scope. */
+    fun requestStop() {
+        serviceScope.launch { stopRecording() }
+    }
+
+    suspend fun stopRecording(): File? {
         if (!_isRecording.value) {
             // An idle stop command (double tap, stale notification action) must not leave a
             // started service behind. onDestroy reaches this path as well, where both calls
@@ -152,18 +160,26 @@ class RecordingService : Service() {
         val startTime = recordingStartWallTime
         val endTime = System.currentTimeMillis()
         currentOutputFile = null
+        // Detach the recorder before leaving the main thread: a second stop while the file is
+        // being finalized must not touch the same instance.
+        val recorder = mediaRecorder
+        mediaRecorder = null
+        _isRecording.value = false
+        stopTimer()
 
-        try {
-            mediaRecorder?.stop()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        } finally {
-            cleanupRecorder()
-            _isRecording.value = false
-            stopTimer()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+        // MediaRecorder.stop() finalizes the container and can block on long recordings.
+        withContext(Dispatchers.IO) {
+            try {
+                recorder?.stop()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                releaseRecorder(recorder)
+            }
         }
+
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
 
         if (recordedFile != null && recordedFile.exists() && recordedFile.length() > 0L) {
             val app = application as? LastMeetingApp
@@ -180,12 +196,16 @@ class RecordingService : Service() {
     }
 
     private fun cleanupRecorder() {
+        releaseRecorder(mediaRecorder)
+        mediaRecorder = null
+    }
+
+    private fun releaseRecorder(recorder: AudioRecorder?) {
         try {
-            mediaRecorder?.release()
+            recorder?.release()
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        mediaRecorder = null
     }
 
     private fun startTimer() {
@@ -279,12 +299,16 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
-        stopRecording()
+        // Last chance to finalize the container. Normally the recording is already stopped and
+        // this hits the cheap idle path; the bounded wait only matters when the service is torn
+        // down mid-recording.
+        runBlocking { withTimeoutOrNull(DESTROY_STOP_TIMEOUT_MS) { stopRecording() } }
         serviceScope.cancel()
         super.onDestroy()
     }
 
     companion object {
+        private const val DESTROY_STOP_TIMEOUT_MS = 2_000L
         const val CHANNEL_ID = "recording_service_channel"
         const val NOTIFICATION_ID = 1001
         const val ACTION_START_RECORDING = "com.example.lastmeeting.action.START_RECORDING"

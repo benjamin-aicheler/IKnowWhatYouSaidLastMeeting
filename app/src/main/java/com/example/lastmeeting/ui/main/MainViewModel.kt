@@ -169,7 +169,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopRecording() {
         val service = recordingService
         if (service != null) {
-            service.stopRecording()
+            // Finalization runs in the service scope; MediaRecorder.stop() must not block the
+            // click handler.
+            service.requestStop()
         } else {
             val context = getApplication<Application>()
             val intent = Intent(context, RecordingService::class.java).apply {
