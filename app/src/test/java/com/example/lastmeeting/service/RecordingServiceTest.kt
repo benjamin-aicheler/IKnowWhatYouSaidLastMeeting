@@ -143,6 +143,19 @@ class RecordingServiceTest {
     }
 
     @Test
+    fun releasesTheRecorderWhenStopThrows() {
+        startCommand()
+        recorder.failAt = "stop"
+
+        runBlocking { service.stopRecording() }
+
+        // A failing stop() must not leave the native recorder and the microphone allocated.
+        assertEquals(1, recorder.releaseCalls)
+        assertFalse(service.isRecording.value)
+        assertTrue(shadowOf(service).isStoppedBySelf)
+    }
+
+    @Test
     fun idleStopCommandStopsTheService() {
         startCommand(RecordingService.ACTION_STOP_RECORDING)
         // The stop request runs in the service scope, so the main looper has to drain first.
@@ -210,7 +223,7 @@ class RecordingServiceTest {
             startCalls++
             failIfRequested("start")
         }
-        override fun stop() = Unit
+        override fun stop() = failIfRequested("stop")
         override fun release() {
             releaseCalls++
             if (failRelease) throw IllegalStateException("release failed")
