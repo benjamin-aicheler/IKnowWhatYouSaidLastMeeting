@@ -14,11 +14,21 @@
   - `id` (Long / Primary Key)
   - `title` (String, defaults to localized timestamp string, e.g., "Meeting 2024-11-24 14:30")
   - `startTime` (Long, epoch milliseconds)
-  - `endTime` (Long, epoch milliseconds)
+  - `endTime` (Long, epoch milliseconds; `0` while the recording is still running)
   - `audioFilePath` (String)
   - `transcript` (String, nullable)
   - `protocol` (String, nullable)
   - `createdAt` (Long)
+
+### Recording Lifecycle
+- The meeting row is inserted as soon as the recorder runs, not after it stops, so an interrupted recording keeps a meeting instead of leaving an audio file nothing points at.
+- `endTime = 0` marks a running recording. `getAllMeetings()` filters `endTime > 0`, so a running recording never appears in the list and cannot be deleted while the microphone is open.
+- `MeetingRepository.finishMeeting()` closes the row on stop. The insert is kept as a `Deferred` and awaited rather than matched back by file path — a slow insert must not produce a second row for the same file. If the insert failed, stop falls back to `createMeeting()`; a recording that produced no usable audio discards its row.
+- `reconcileRecordings()` runs in `LastMeetingApp.onCreate`: unfinished rows are closed from the audio file's last modification time, rows whose file vanished are deleted, and `.m4a` files without a row are adopted (visible and deletable). It never deletes files from storage and is idempotent.
+
+### Backup
+- `android:allowBackup="false"` is deliberate: the settings DataStore holds the API key, recordings are private and exceed the 25 MB backup quota, and a partial restore would leave meeting rows without their audio.
+- The API key is stored unencrypted in app-private storage. Keystore encryption was considered and dropped: it only guards against extraction on a rooted device, cannot be verified in CI (Robolectric has no `AndroidKeyStore`), and adds key-loss and migration risk.
 
 ### AI Integration (Multimodal Chat Completions)
 - **API Standard**: Strictly use `/v1/chat/completions` (OpenAI Multimodal Chat Completions API format).
@@ -45,12 +55,13 @@
 - **Settings View**: Configure API Base URL, API Key, Multimodal Model Name, and System Prompts.
 
 ### Export & Sharing
-- **PDF Export**: Generated dynamically using Android `android.graphics.pdf.PdfDocument` and saved to `Downloads/LastMeeting/` via MediaStore.
+- **PDF Export**: Generated dynamically using Android `android.graphics.pdf.PdfDocument` and saved to `Downloads/LastMeeting/`. API 29+ writes through MediaStore; API 26-28 writes to the public Downloads folder directly and therefore needs `WRITE_EXTERNAL_STORAGE` (`android:maxSdkVersion="28"`), requested by the export action in `MeetingDetailsScreen` before the exporter runs.
 - **Sharing**: Android Sharesheet (`Intent.ACTION_SEND` with `FileProvider`) for audio file, transcript, or protocol.
 
 ### Background Services & Screen Retention
 - **Audio Recording**: Android `ForegroundService` with notification and `foregroundServiceType="microphone"`. Recording will not stop when the screen turns off or the app is minimized.
-- **AI Processing (Transcribing & Protocolizing)**: Background WorkManager / Service tasks with proper lifecycle management so network requests finish reliably when screen turns off.
+- **AI Processing (Transcribing & Protocolizing)**: Background WorkManager / Service tasks with proper lifecycle management so network requests finish reliably when screen turns off. The worker runs in the foreground where the platform allows it.
+- **Retries**: `AiRetryPolicy` retries HTTP 429, 5xx and network failures, at most three runs with 30 s/60 s exponential backoff. Other 4xx, configuration and serialization failures fail immediately. There is no second retry loop in the HTTP client, so attempts are not multiplied.
 
 ### Localization & Multi-Language Support
 - **Languages Supported**: English (`res/values/strings.xml`) and German (`res/values-de/strings.xml`).

@@ -9,6 +9,7 @@
 - 🎙️ **Persistent Audio Recording**:
   - Records audio in high-quality `M4A` (AAC) format.
   - Powered by an Android **Foreground Service** with persistent notification and microphone service type—recording continues uninterrupted when the screen turns off or the app is minimized.
+  - Crash-safe: the meeting is saved when recording starts, so an interrupted recording is recovered on the next app start instead of leaving an unreachable audio file behind.
 
 - 🤖 **Multimodal AI Transcription & Protocolization**:
   - Leverages standard OpenAI Multimodal Chat Completions (`/v1/chat/completions`) by sending base64-encoded audio.
@@ -24,7 +25,7 @@
   - Read transcript and protocol text directly in the app.
 
 - 📄 **Export & Share**:
-  - Export transcript or protocol as a cleanly formatted **PDF** directly to the public `Downloads/LastMeeting` folder.
+  - Export transcript or protocol as a cleanly formatted **PDF** directly to the public `Downloads/LastMeeting` folder (Android 8/9 asks for storage access once before the first export).
   - Share audio, transcript (PDF or text), or protocol (PDF or text) via the native Android Sharesheet.
 
 - 🗑️ **Permanent & Individual Deletions**:
@@ -106,6 +107,24 @@ To use AI transcription or protocolization:
 4. Enter the **Multimodal Model Name** (e.g. `gpt-4o-audio-preview`, `gpt-4o`, `google/gemini-flash-1.5`, etc.).
 5. (Optional) Customize the **Transcription** or **Protocol** system prompts.
 6. Tap **Save Settings**.
+
+---
+
+## 🔐 Data & Privacy
+
+- Recordings, transcripts and protocols stay on the device in app-private storage.
+- Android auto-backup and device-to-device transfer are disabled (`android:allowBackup="false"`), so no app data is uploaded to Google.
+- The API key is stored in app-private storage, unencrypted, and is only sent to the endpoint you configure.
+- A deletion that cannot remove the audio file keeps the meeting record, so a file is never left behind without a reference.
+
+---
+
+## 🤖 AI Disclosure
+
+Parts of this project were developed with AI coding assistance. The maintenance work from issues
+#20–#30 (November 2026) was done with **Ikaros**, a Hermes Agent instance by Nous Research, under
+review of the repository owner: every change went through a pull request that was reviewed and
+merged by hand, and architecture and product decisions stayed with the human maintainer.
 
 ---
 
