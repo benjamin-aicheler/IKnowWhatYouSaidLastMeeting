@@ -17,6 +17,17 @@ updates:
     assignees: ["benjamin-aicheler"]
     commit-message:
       prefix: "chore(deps)"
+    # Build-classpath libraries only. Dependabot security updates on Gradle cover dependencies
+    # declared in the build files (there is no "indirect" dependency-type for Gradle), so an
+    # advisory on one of these transitive libraries cannot produce a PR: the update job fails
+    # with dependency_not_found and takes the whole run down. None of them ship in the APK.
+    ignore:
+      - dependency-name: "com.google.guava:guava"
+      - dependency-name: "org.apache.commons:commons-lang3"
+      - dependency-name: "org.apache.httpcomponents:httpclient"
+      - dependency-name: "org.bitbucket.b_c:jose4j"
+      - dependency-name: "org.bouncycastle:*"
+      - dependency-name: "org.jdom:jdom2"
     groups:
       gradle-security:
         patterns: ["*"]
