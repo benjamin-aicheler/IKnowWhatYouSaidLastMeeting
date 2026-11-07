@@ -101,11 +101,11 @@ fun MainScreen(
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val recordAudioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
-        if (recordAudioGranted) {
-            viewModel.toggleRecording()
-        }
+    ) { _ ->
+        // The result map only holds the permissions that were requested, so RECORD_AUDIO is
+        // missing whenever it was already granted and only POST_NOTIFICATIONS was asked for.
+        // The view model checks the actual permission state and reports a denial.
+        viewModel.toggleRecording()
     }
 
     fun handleRecordClick() {
