@@ -7,6 +7,7 @@ import com.example.lastmeeting.repository.MeetingRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class LastMeetingApp : Application() {
 
@@ -30,5 +31,15 @@ class LastMeetingApp : Application() {
             meetingDao = database.meetingDao(),
             settingsRepository = settingsRepository
         )
+
+        // A killed process can leave an unfinished row or a recording without one; repair that
+        // before the meeting list is shown.
+        applicationScope.launch {
+            try {
+                meetingRepository.reconcileRecordings()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 }

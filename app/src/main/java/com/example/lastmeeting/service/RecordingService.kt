@@ -20,9 +20,11 @@ import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.MainActivity
 import com.example.lastmeeting.R
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +48,8 @@ class RecordingService : Service() {
     private var currentOutputFile: File? = null
     private var recordingStartElapsedTime: Long = 0
     private var recordingStartWallTime: Long = 0
+    /** Row inserted when the recording starts, so an interrupted recording keeps its meeting. */
+    private var pendingMeetingRow: Deferred<Long?>? = null
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
@@ -116,6 +120,17 @@ class RecordingService : Service() {
             recordingStartWallTime = System.currentTimeMillis()
             _isRecording.value = true
 
+            // Persist the meeting right away: if the process dies mid-recording, the audio stays
+            // reachable instead of lying on disk with nothing pointing at it.
+            val startWallTime = recordingStartWallTime
+            val app = application as? LastMeetingApp
+            if (app != null) {
+                pendingMeetingRow = app.applicationScope.async {
+                    runCatching { app.meetingRepository.startMeeting(outputFile, startWallTime) }
+                        .getOrNull()
+                }
+            }
+
             updateNotification()
             startTimer()
 
@@ -181,14 +196,25 @@ class RecordingService : Service() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
 
-        if (recordedFile != null && recordedFile.exists() && recordedFile.length() > 0L) {
-            val app = application as? LastMeetingApp
-            app?.applicationScope?.launch {
-                app.meetingRepository.createMeeting(
-                    audioFile = recordedFile,
-                    startTime = startTime,
-                    endTime = endTime
-                )
+        val app = application as? LastMeetingApp
+        if (app != null) {
+            val rowId = pendingMeetingRow?.let { deferred ->
+                withTimeoutOrNull(MEETING_ROW_TIMEOUT_MS) { deferred.await() }
+            }
+            pendingMeetingRow = null
+
+            val audioFile = recordedFile
+            if (audioFile != null && audioFile.exists() && audioFile.length() > 0L) {
+                app.applicationScope.launch {
+                    if (rowId != null) {
+                        app.meetingRepository.finishMeeting(rowId, endTime)
+                    } else {
+                        // The insert at start failed or never ran; fall back to the old path.
+                        app.meetingRepository.createMeeting(audioFile, startTime, endTime)
+                    }
+                }
+            } else if (rowId != null) {
+                app.applicationScope.launch { app.meetingRepository.discardMeeting(rowId) }
             }
         }
 
@@ -309,6 +335,7 @@ class RecordingService : Service() {
 
     companion object {
         private const val DESTROY_STOP_TIMEOUT_MS = 2_000L
+        private const val MEETING_ROW_TIMEOUT_MS = 5_000L
         const val CHANNEL_ID = "recording_service_channel"
         const val NOTIFICATION_ID = 1001
         const val ACTION_START_RECORDING = "com.example.lastmeeting.action.START_RECORDING"

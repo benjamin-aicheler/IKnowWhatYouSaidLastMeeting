@@ -9,6 +9,7 @@ data class MeetingEntity(
     val id: Long = 0,
     val title: String,
     val startTime: Long,
+    /** Wall-clock end of the recording; 0 while the recording is still running. */
     val endTime: Long,
     val audioFilePath: String,
     val transcript: String? = null,

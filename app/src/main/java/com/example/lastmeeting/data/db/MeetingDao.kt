@@ -9,8 +9,15 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MeetingDao {
 
-    @Query("SELECT * FROM meetings ORDER BY startTime DESC")
+    // endTime = 0 marks a recording that is still running, so it never shows up as a meeting.
+    @Query("SELECT * FROM meetings WHERE endTime > 0 ORDER BY startTime DESC")
     fun getAllMeetings(): Flow<List<MeetingEntity>>
+
+    @Query("SELECT * FROM meetings WHERE endTime = 0")
+    suspend fun getUnfinishedMeetings(): List<MeetingEntity>
+
+    @Query("SELECT audioFilePath FROM meetings")
+    suspend fun getAllAudioPaths(): List<String>
 
     @Query("SELECT * FROM meetings WHERE id = :id")
     fun getMeetingById(id: Long): Flow<MeetingEntity?>
@@ -29,6 +36,9 @@ interface MeetingDao {
 
     @Query("UPDATE meetings SET protocol = :protocol WHERE id = :id")
     suspend fun updateProtocol(id: Long, protocol: String?)
+
+    @Query("UPDATE meetings SET endTime = :endTime WHERE id = :id")
+    suspend fun finishMeeting(id: Long, endTime: Long)
 
     @Query("DELETE FROM meetings WHERE id = :id")
     suspend fun deleteMeeting(id: Long)
