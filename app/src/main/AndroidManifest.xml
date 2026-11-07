@@ -13,9 +13,12 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- No cloud backup or device transfer: the settings DataStore holds the API key, the
+         recordings are private and larger than the 25 MB quota, and a partial restore would
+         leave meeting rows without their audio. -->
     <application
         android:name=".LastMeetingApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
