@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.UUID
 
 sealed class DetailsUiEvent {
     data class ShowToast(val message: String) : DetailsUiEvent()
@@ -78,8 +77,6 @@ class MeetingDetailsViewModel(
     private var mediaPlayer: MediaPlayer? = null
     private var isAudioPaused: Boolean = false
 
-    private val observedActiveWorkIds = mutableSetOf<UUID>()
-
     init {
         observeWorkCompletion(
             workFlow = transcribeWorkFlow,
@@ -95,30 +92,31 @@ class MeetingDetailsViewModel(
         workFlow: kotlinx.coroutines.flow.Flow<List<WorkInfo>>,
         successMessageRes: Int
     ) {
+        val trackedRuns = WorkRunTracker()
         viewModelScope.launch {
             workFlow.collect { infos ->
-                // Every run of the unique work is reported, not just the oldest one: a kept
-                // previous run would otherwise mask the completion of a newer one.
                 infos.forEach { info ->
-                    if (!info.state.isFinished) {
-                        observedActiveWorkIds.add(info.id)
-                    } else if (observedActiveWorkIds.remove(info.id)) {
-                        when (info.state) {
-                            WorkInfo.State.SUCCEEDED -> {
-                                _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(successMessageRes)))
-                            }
-                            WorkInfo.State.FAILED -> {
-                                val errorMsg = info.outputData.getString(AiProcessingWorker.KEY_ERROR_MESSAGE)
-                                    ?: "Unknown error"
-                                _eventFlow.emit(
-                                    DetailsUiEvent.ShowToast(app.getString(R.string.msg_ai_error, errorMsg))
-                                )
-                            }
-                            else -> Unit
-                        }
+                    if (trackedRuns.record(info.id, info.state.isFinished)) {
+                        reportCompletion(info, successMessageRes)
                     }
                 }
             }
+        }
+    }
+
+    private suspend fun reportCompletion(info: WorkInfo, successMessageRes: Int) {
+        when (info.state) {
+            WorkInfo.State.SUCCEEDED -> {
+                _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(successMessageRes)))
+            }
+            WorkInfo.State.FAILED -> {
+                val errorMsg = info.outputData.getString(AiProcessingWorker.KEY_ERROR_MESSAGE)
+                    ?: "Unknown error"
+                _eventFlow.emit(
+                    DetailsUiEvent.ShowToast(app.getString(R.string.msg_ai_error, errorMsg))
+                )
+            }
+            else -> Unit
         }
     }
 
