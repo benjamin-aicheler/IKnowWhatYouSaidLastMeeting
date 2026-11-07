@@ -1,6 +1,11 @@
 package com.example.lastmeeting.ui.details
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +58,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.example.lastmeeting.R
 import com.example.lastmeeting.ui.components.DeleteConfirmationDialog
 import java.text.SimpleDateFormat
@@ -80,6 +86,34 @@ fun MeetingDetailsScreen(
 
     var isEditingTitle by remember { mutableStateOf(false) }
     var titleText by remember(meeting?.title) { mutableStateOf(meeting?.title ?: "") }
+
+    // Publishing to the public Downloads folder needs WRITE_EXTERNAL_STORAGE on API 26-28.
+    var pendingExport by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val action = pendingExport
+        pendingExport = null
+        if (granted) {
+            action?.invoke()
+        } else {
+            Toast.makeText(context, R.string.msg_storage_permission_required, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun exportToDownloads(action: () -> Unit) {
+        val needsLegacyStorage = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) != PackageManager.PERMISSION_GRANTED
+        if (needsLegacyStorage) {
+            pendingExport = action
+            storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else {
+            action()
+        }
+    }
 
     LaunchedEffect(resources) {
         viewModel.eventFlow.collect { event ->
@@ -229,7 +263,7 @@ fun MeetingDetailsScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(if (isPlayingAudio) stringResource(R.string.action_pause) else stringResource(R.string.action_play))
                             }
-                            OutlinedButton(onClick = { viewModel.downloadAudio() }) {
+                            OutlinedButton(onClick = { exportToDownloads { viewModel.downloadAudio() } }) {
                                 Icon(imageVector = Icons.Default.Download, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(stringResource(R.string.action_download_audio))
@@ -300,7 +334,9 @@ fun MeetingDetailsScreen(
                             if (currentMeeting.transcript != null) {
                                 Row {
                                     IconButton(onClick = {
-                                        viewModel.exportPdf(transcriptLabel, currentMeeting.transcript)
+                                        exportToDownloads {
+                                            viewModel.exportPdf(transcriptLabel, currentMeeting.transcript)
+                                        }
                                     }) {
                                         Icon(
                                             imageVector = Icons.Default.Download,
@@ -372,7 +408,9 @@ fun MeetingDetailsScreen(
                             if (currentMeeting.protocol != null) {
                                 Row {
                                     IconButton(onClick = {
-                                        viewModel.exportPdf(protocolLabel, currentMeeting.protocol)
+                                        exportToDownloads {
+                                            viewModel.exportPdf(protocolLabel, currentMeeting.protocol)
+                                        }
                                     }) {
                                         Icon(
                                             imageVector = Icons.Default.Download,
