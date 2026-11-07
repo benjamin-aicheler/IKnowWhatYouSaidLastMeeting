@@ -6,7 +6,9 @@ import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
+import android.os.Looper
 import com.example.lastmeeting.R
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -135,7 +137,7 @@ class RecordingServiceTest {
         startCommand()
         assertEquals(1, factoryCalls)
         assertEquals(1, recorder.startCalls)
-        assertEquals(firstFile, service.stopRecording())
+        assertEquals(firstFile, runBlocking { service.stopRecording() })
         assertEquals(1, recorder.releaseCalls)
         assertFalse(service.isRecording.value)
     }
@@ -143,6 +145,8 @@ class RecordingServiceTest {
     @Test
     fun idleStopCommandStopsTheService() {
         startCommand(RecordingService.ACTION_STOP_RECORDING)
+        // The stop request runs in the service scope, so the main looper has to drain first.
+        shadowOf(Looper.getMainLooper()).idle()
         assertFalse(service.isRecording.value)
         assertTrue(shadowOf(service).isStoppedBySelf)
         assertNull(shadowOf(service).lastForegroundNotification)
@@ -169,7 +173,7 @@ class RecordingServiceTest {
         assertNotNull(recorder.outputFile)
         assertFalse(recorder.outputFile!!.exists())
         // Idle stop/onDestroy must not expose or save the discarded partial recording.
-        assertNull(service.stopRecording())
+        assertNull(runBlocking { service.stopRecording() })
     }
 
     private fun assertFailedStart(error: Int = R.string.msg_recording_start_failed) {
