@@ -305,8 +305,12 @@ class MeetingDetailsViewModel(
     fun deleteMeeting() {
         viewModelScope.launch {
             stopAudioPlayer()
-            repository.deleteMeeting(meetingId)
-            _eventFlow.emit(DetailsUiEvent.MeetingDeleted)
+            val result = repository.deleteMeeting(meetingId)
+            if (result.isSuccess) {
+                _eventFlow.emit(DetailsUiEvent.MeetingDeleted)
+            } else {
+                _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_delete_failed)))
+            }
         }
     }
 

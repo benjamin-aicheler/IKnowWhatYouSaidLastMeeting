@@ -21,7 +21,8 @@ class MeetingRepository(
     private val context: Context,
     private val meetingDao: MeetingDao,
     private val settingsRepository: SettingsRepository,
-    private val apiClient: OpenAiApiClient = OpenAiApiClient()
+    private val apiClient: OpenAiApiClient = OpenAiApiClient(),
+    private val deleteAudioFile: (File) -> Boolean = File::delete
 ) {
 
     val allMeetings: Flow<List<MeetingEntity>> = meetingDao.getAllMeetings()
@@ -94,19 +95,21 @@ class MeetingRepository(
         meetingDao.updateProtocol(id, null)
     }
 
-    suspend fun deleteMeeting(id: Long) {
+    suspend fun deleteMeeting(id: Long): Result<Unit> {
         val meeting = meetingDao.getMeetingByIdDirect(id)
-        if (meeting != null) {
-            val audioFile = File(meeting.audioFilePath)
-            if (audioFile.exists()) {
-                try {
-                    audioFile.delete()
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-            meetingDao.deleteMeeting(id)
+            ?: return Result.failure(Exception("Meeting not found."))
+
+        val audioFile = File(meeting.audioFilePath)
+        val audioGone = !audioFile.exists() ||
+            runCatching { deleteAudioFile(audioFile) }.getOrDefault(false)
+        if (!audioGone) {
+            // Without the row the recording would be orphaned on disk and unreachable in the
+            // UI, so the delete is reported as failed and the meeting stays.
+            return Result.failure(Exception(context.getString(R.string.msg_delete_failed)))
         }
+
+        meetingDao.deleteMeeting(id)
+        return Result.success(Unit)
     }
 
     suspend fun exportPdf(title: String, typeLabel: String, textContent: String): Result<String> =
