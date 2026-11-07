@@ -16,6 +16,11 @@
     <string name="msg_recording_permission_required">Für die Aufnahme ist die Mikrofonberechtigung erforderlich. Bitte erlauben Sie den Mikrofonzugriff und versuchen Sie es erneut.</string>
     <string name="notification_channel_recording_name">Sitzungsaufnahme</string>
     <string name="notification_channel_recording_desc">Zeigt den Status einer aktiven Sitzungsaufnahme an</string>
+    <string name="notification_channel_ai_name">KI-Verarbeitung</string>
+    <string name="notification_channel_ai_desc">Zeigt laufende Transkriptionen und Protokolle an</string>
+    <string name="ai_processing_notification_title">Aufnahme wird verarbeitet</string>
+    <string name="ai_processing_transcribing">Aufnahme wird transkribiert…</string>
+    <string name="ai_processing_protocolizing">Protokoll wird erstellt…</string>
     <string name="no_meetings">Noch keine Sitzungen aufgenommen. Tippen Sie auf Aufnehmen, um zu starten.</string>
     <string name="filter_all_dates">Alle Tage</string>
     <string name="action_back">Zurück</string>

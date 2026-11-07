@@ -16,6 +16,11 @@
     <string name="msg_recording_permission_required">Microphone permission is required to record. Please allow microphone access and try again.</string>
     <string name="notification_channel_recording_name">Meeting Recording</string>
     <string name="notification_channel_recording_desc">Shows active meeting recording status</string>
+    <string name="notification_channel_ai_name">AI Processing</string>
+    <string name="notification_channel_ai_desc">Shows transcription and protocol jobs that are still running</string>
+    <string name="ai_processing_notification_title">Processing recording</string>
+    <string name="ai_processing_transcribing">Transcribing the recording…</string>
+    <string name="ai_processing_protocolizing">Writing the protocol…</string>
     <string name="no_meetings">No meetings recorded yet. Tap Record to start.</string>
     <string name="filter_all_dates">All Dates</string>
     <string name="action_back">Back</string>
