@@ -42,6 +42,12 @@ internal data class ApiErrorDetail(
     val message: String? = null
 )
 
+/**
+ * A non-2xx response. Carries the status code so callers can tell a retryable server problem
+ * from a request that will never succeed.
+ */
+internal class ApiHttpException(val code: Int, message: String) : IOException(message)
+
 class OpenAiApiClient(
     connectTimeoutSeconds: Long = 60,
     readTimeoutSeconds: Long = 300,
@@ -104,7 +110,7 @@ class OpenAiApiClient(
                     } catch (_: Exception) {
                         "HTTP ${response.code}: ${response.message}"
                     }
-                    return@withContext Result.failure(IOException(errorMessage))
+                    return@withContext Result.failure(ApiHttpException(response.code, errorMessage))
                 }
 
                 val completionResponse = json.decodeFromString<ChatCompletionResponse>(responseBody)
