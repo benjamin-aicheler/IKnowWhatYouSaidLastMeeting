@@ -22,27 +22,96 @@ class MeetingRepository(
     private val meetingDao: MeetingDao,
     private val settingsRepository: SettingsRepository,
     private val apiClient: OpenAiApiClient = OpenAiApiClient(),
-    private val deleteAudioFile: (File) -> Boolean = File::delete
+    private val deleteAudioFile: (File) -> Boolean = File::delete,
+    private val recordingsDir: File = File(context.filesDir, "recordings")
 ) {
 
     val allMeetings: Flow<List<MeetingEntity>> = meetingDao.getAllMeetings()
 
     fun getMeetingById(id: Long): Flow<MeetingEntity?> = meetingDao.getMeetingById(id)
 
-    suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long {
-        val dateString = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(startTime))
-        val defaultTitle = context.getString(R.string.default_meeting_title, dateString)
-
-        val entity = MeetingEntity(
-            title = defaultTitle,
-            startTime = startTime,
-            endTime = endTime,
-            audioFilePath = audioFile.absolutePath,
-            transcript = null,
-            protocol = null,
-            createdAt = System.currentTimeMillis()
+    suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long =
+        meetingDao.insertMeeting(
+            MeetingEntity(
+                title = defaultTitle(startTime),
+                startTime = startTime,
+                endTime = endTime,
+                audioFilePath = audioFile.absolutePath,
+                transcript = null,
+                protocol = null,
+                createdAt = System.currentTimeMillis()
+            )
         )
-        return meetingDao.insertMeeting(entity)
+
+    /**
+     * Inserts the row as soon as the recorder runs, so a recording interrupted by process death
+     * keeps a meeting instead of leaving a file nothing points at. [MeetingEntity.endTime] stays
+     * 0 until [finishMeeting] closes it, which keeps it out of the meeting list meanwhile.
+     */
+    suspend fun startMeeting(audioFile: File, startTime: Long): Long =
+        meetingDao.insertMeeting(
+            MeetingEntity(
+                title = defaultTitle(startTime),
+                startTime = startTime,
+                endTime = 0L,
+                audioFilePath = audioFile.absolutePath,
+                transcript = null,
+                protocol = null,
+                createdAt = System.currentTimeMillis()
+            )
+        )
+
+    suspend fun finishMeeting(id: Long, endTime: Long) {
+        meetingDao.finishMeeting(id, endTime)
+    }
+
+    /** Drops the row of a recording that never produced playable audio. */
+    suspend fun discardMeeting(id: Long) {
+        meetingDao.deleteMeeting(id)
+    }
+
+    /**
+     * Repairs what a killed process leaves behind: unfinished rows are closed with the audio
+     * file's last modification time, or dropped when the audio is gone; recordings that never got
+     * a row are adopted so they are visible and deletable instead of sitting on disk unseen.
+     */
+    suspend fun reconcileRecordings(): Int {
+        var changes = 0
+
+        meetingDao.getUnfinishedMeetings().forEach { meeting ->
+            val audioFile = File(meeting.audioFilePath)
+            if (audioFile.exists()) {
+                meetingDao.finishMeeting(meeting.id, maxOf(audioFile.lastModified(), meeting.startTime))
+            } else {
+                meetingDao.deleteMeeting(meeting.id)
+            }
+            changes++
+        }
+
+        val knownPaths = meetingDao.getAllAudioPaths().toSet()
+        val orphans = recordingsDir.listFiles { file -> file.isFile && file.extension == "m4a" }.orEmpty()
+        orphans.filterNot { it.absolutePath in knownPaths }.forEach { orphan ->
+            val timestamp = maxOf(orphan.lastModified(), 0L)
+            meetingDao.insertMeeting(
+                MeetingEntity(
+                    title = defaultTitle(timestamp),
+                    startTime = timestamp,
+                    endTime = timestamp,
+                    audioFilePath = orphan.absolutePath,
+                    transcript = null,
+                    protocol = null,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+            changes++
+        }
+
+        return changes
+    }
+
+    private fun defaultTitle(startTime: Long): String {
+        val dateString = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(startTime))
+        return context.getString(R.string.default_meeting_title, dateString)
     }
 
     suspend fun updateTitle(id: Long, newTitle: String) {
