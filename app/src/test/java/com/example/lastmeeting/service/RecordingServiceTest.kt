@@ -8,10 +8,16 @@ import android.app.NotificationManager
 import android.content.Intent
 import android.os.Looper
 import com.example.lastmeeting.R
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -27,8 +33,11 @@ import org.robolectric.annotation.Config
 import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
+import java.util.Collections
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [26, 34])
@@ -178,6 +187,119 @@ class RecordingServiceTest {
         assertEquals(listOf(existing), directory.listFiles()!!.toList())
     }
 
+    @Test
+    fun startDuringStopFinalizationIsRejectedAndNextSessionSucceedsAfterStopCompletes() = runBlocking {
+        val store = FakeMeetingStore()
+        val persistenceScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = persistenceScope
+
+        val stopEntered = CountDownLatch(1)
+        val allowStopFinish = CountDownLatch(1)
+        val recorderA = FakeRecorder(
+            onStop = {
+                stopEntered.countDown()
+                check(allowStopFinish.await(5, TimeUnit.SECONDS)) { "Timed out waiting to finish stop" }
+            }
+        )
+        val recorderB = FakeRecorder()
+        val recorders = ArrayDeque(listOf(recorderA, recorderB))
+        service.recorderFactory = {
+            factoryCalls++
+            recorders.removeFirst()
+        }
+
+        // 1. Start session A
+        val fileA = service.startRecording()
+        assertNotNull(fileA)
+        assertTrue(service.isRecording.value)
+        assertFalse(service.isStopping.value)
+        assertEquals(listOf(fileA!!.absolutePath), store.startedPaths)
+
+        // 2. Begin stopping session A and hold inside recorderA.stop()
+        val stopADeferred = async(Dispatchers.Default) { service.stopRecording() }
+        assertTrue(stopEntered.await(5, TimeUnit.SECONDS))
+
+        assertFalse(service.isRecording.value)
+        assertTrue(service.isStopping.value)
+        assertFalse(shadowOf(service).isForegroundStopped)
+        assertFalse(shadowOf(service).isStoppedBySelf)
+
+        // 3. Attempt to start session B while A is still finalizing
+        val rejectedStart = service.startRecording()
+        assertNull(rejectedStart)
+        startCommand(RecordingService.ACTION_START_RECORDING)
+        assertEquals(1, factoryCalls)
+        assertEquals(listOf(fileA.absolutePath), store.startedPaths)
+        assertFalse(shadowOf(service).isForegroundStopped)
+        assertTrue(service.isStopping.value)
+
+        // 4. Release session A's stop and verify A's file, row, and foreground teardown
+        allowStopFinish.countDown()
+        val stoppedFileA = stopADeferred.await()
+        assertEquals(fileA, stoppedFileA)
+        assertFalse(service.isStopping.value)
+        assertEquals(1, recorderA.stopCalls)
+        assertEquals(1, recorderA.releaseCalls)
+        assertEquals(listOf(1L), store.finishedIds)
+        assertTrue(shadowOf(service).isForegroundStopped)
+        assertTrue(shadowOf(service).isStoppedBySelf)
+
+        // 5. Start session B after A has finalized; verify B gets its own file, row, and foreground state
+        val fileB = service.startRecording()
+        assertNotNull(fileB)
+        assertNotEquals(fileA, fileB)
+        assertTrue(service.isRecording.value)
+        assertFalse(service.isStopping.value)
+        assertEquals(2, factoryCalls)
+        assertEquals(listOf(fileA.absolutePath, fileB!!.absolutePath), store.startedPaths)
+
+        val stoppedFileB = service.stopRecording()
+        assertEquals(fileB, stoppedFileB)
+        assertEquals(listOf(1L, 2L), store.finishedIds)
+    }
+
+    @Test
+    fun duplicateStopDuringFinalizationAwaitsInFlightStopWithoutTearingDownEarly() = runBlocking {
+        val store = FakeMeetingStore()
+        val persistenceScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = persistenceScope
+
+        val stopEntered = CountDownLatch(1)
+        val allowStopFinish = CountDownLatch(1)
+        recorder = FakeRecorder(
+            onStop = {
+                stopEntered.countDown()
+                check(allowStopFinish.await(5, TimeUnit.SECONDS)) { "Timed out waiting to finish stop" }
+            }
+        )
+
+        val fileA = service.startRecording()
+        assertNotNull(fileA)
+
+        val firstStop = async(Dispatchers.Default) { service.stopRecording() }
+        assertTrue(stopEntered.await(5, TimeUnit.SECONDS))
+
+        // Issue a second stop while the first is still inside recorder.stop()
+        val secondStop = async(Dispatchers.Default) { service.stopRecording() }
+        // Give the second stop a moment to reach the in-flight deferred
+        Thread.sleep(50)
+
+        assertFalse(shadowOf(service).isForegroundStopped)
+        assertFalse(shadowOf(service).isStoppedBySelf)
+        assertEquals(1, recorder.stopCalls)
+
+        allowStopFinish.countDown()
+        assertEquals(fileA, firstStop.await())
+        assertEquals(fileA, secondStop.await())
+        assertEquals(1, recorder.stopCalls)
+        assertEquals(1, recorder.releaseCalls)
+        assertEquals(listOf(1L), store.finishedIds)
+        assertTrue(shadowOf(service).isForegroundStopped)
+        assertTrue(shadowOf(service).isStoppedBySelf)
+    }
+
     private fun assertStartupFailure(stage: String) {
         recorder.failAt = stage
         startCommand()
@@ -205,12 +327,15 @@ class RecordingServiceTest {
         service.onStartCommand(intent, 0, 1)
     }
 
-    private class FakeRecorder : AudioRecorder {
+    private class FakeRecorder(
+        private val onStop: (() -> Unit)? = null
+    ) : AudioRecorder {
         var failAt: String? = null
         var failRelease = false
         var outputFile: File? = null
         var releaseCalls = 0
         var startCalls = 0
+        var stopCalls = 0
 
         override fun configure(outputFile: File) {
             this.outputFile = outputFile
@@ -223,7 +348,11 @@ class RecordingServiceTest {
             startCalls++
             failIfRequested("start")
         }
-        override fun stop() = failIfRequested("stop")
+        override fun stop() {
+            stopCalls++
+            onStop?.invoke()
+            failIfRequested("stop")
+        }
         override fun release() {
             releaseCalls++
             if (failRelease) throw IllegalStateException("release failed")
@@ -231,6 +360,33 @@ class RecordingServiceTest {
 
         private fun failIfRequested(stage: String) {
             if (failAt == stage) throw IOException("$stage failed")
+        }
+    }
+
+    private class FakeMeetingStore : MeetingSessionStore {
+        private var nextId = 1L
+        val startedPaths: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        val finishedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
+        val discardedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
+
+        override suspend fun startMeeting(audioFile: File, startTime: Long): Long {
+            startedPaths.add(audioFile.absolutePath)
+            return nextId++
+        }
+
+        override suspend fun finishMeeting(id: Long, endTime: Long) {
+            finishedIds.add(id)
+        }
+
+        override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long {
+            startedPaths.add(audioFile.absolutePath)
+            val id = nextId++
+            finishedIds.add(id)
+            return id
+        }
+
+        override suspend fun discardMeeting(id: Long) {
+            discardedIds.add(id)
         }
     }
 }

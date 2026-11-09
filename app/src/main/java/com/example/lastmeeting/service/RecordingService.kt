@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.MainActivity
 import com.example.lastmeeting.R
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -40,19 +41,36 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+internal interface MeetingSessionStore {
+    suspend fun startMeeting(audioFile: File, startTime: Long): Long
+    suspend fun finishMeeting(id: Long, endTime: Long)
+    suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long
+    suspend fun discardMeeting(id: Long)
+}
+
 class RecordingService : Service() {
 
+    private class RecordingSession(
+        val recorder: AudioRecorder,
+        val outputFile: File,
+        val startElapsedTime: Long,
+        val startWallTime: Long,
+        val pendingMeetingRow: Deferred<Long?>?
+    )
+
     private val binder = LocalBinder()
-    private var mediaRecorder: AudioRecorder? = null
+    private val stateLock = Any()
+    private var activeSession: RecordingSession? = null
+    private var stoppingDeferred: CompletableDeferred<File?>? = null
     internal var recorderFactory: () -> AudioRecorder = { AndroidAudioRecorder(this) }
-    private var currentOutputFile: File? = null
-    private var recordingStartElapsedTime: Long = 0
-    private var recordingStartWallTime: Long = 0
-    /** Row inserted when the recording starts, so an interrupted recording keeps its meeting. */
-    private var pendingMeetingRow: Deferred<Long?>? = null
+    internal var meetingStoreOverride: MeetingSessionStore? = null
+    internal var persistenceScopeOverride: CoroutineScope? = null
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
+    private val _isStopping = MutableStateFlow(false)
+    val isStopping: StateFlow<Boolean> = _isStopping.asStateFlow()
 
     private val _elapsedTimeSeconds = MutableStateFlow(0L)
     val elapsedTimeSeconds: StateFlow<Long> = _elapsedTimeSeconds.asStateFlow()
@@ -88,9 +106,16 @@ class RecordingService : Service() {
     }
 
     fun startRecording(): File? {
-        if (_isRecording.value) return currentOutputFile
+        synchronized(stateLock) {
+            if (_isStopping.value || stoppingDeferred != null) {
+                return null
+            }
+            activeSession?.let { return it.outputFile }
+        }
         _startupError.value = null
 
+        var pendingFile: File? = null
+        var pendingRecorder: AudioRecorder? = null
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 throw SecurityException("Microphone permission is required")
@@ -106,43 +131,51 @@ class RecordingService : Service() {
             val outputFile = if (timestampFile.createNewFile()) timestampFile else {
                 File.createTempFile("meeting_${timeStamp}_", ".m4a", recordingsDir)
             }
-            currentOutputFile = outputFile
+            pendingFile = outputFile
 
             val recorder = recorderFactory()
             // Retain ownership before configuration or prepare/start can throw.
-            mediaRecorder = recorder
+            pendingRecorder = recorder
             recorder.apply {
                 configure(outputFile)
                 prepare()
                 start()
             }
-            recordingStartElapsedTime = SystemClock.elapsedRealtime()
-            recordingStartWallTime = System.currentTimeMillis()
-            _isRecording.value = true
+            val startElapsedTime = SystemClock.elapsedRealtime()
+            val startWallTime = System.currentTimeMillis()
 
             // Persist the meeting right away: if the process dies mid-recording, the audio stays
             // reachable instead of lying on disk with nothing pointing at it.
-            val startWallTime = recordingStartWallTime
-            val app = application as? LastMeetingApp
-            if (app != null) {
-                pendingMeetingRow = app.applicationScope.async {
-                    runCatching { app.meetingRepository.startMeeting(outputFile, startWallTime) }
+            val pendingMeetingRow = resolveMeetingStore()?.let { (scope, store) ->
+                scope.async {
+                    runCatching { store.startMeeting(outputFile, startWallTime) }
                         .getOrNull()
                 }
             }
 
-            updateNotification()
-            startTimer()
+            synchronized(stateLock) {
+                activeSession = RecordingSession(
+                    recorder = recorder,
+                    outputFile = outputFile,
+                    startElapsedTime = startElapsedTime,
+                    startWallTime = startWallTime,
+                    pendingMeetingRow = pendingMeetingRow
+                )
+                _isRecording.value = true
+            }
+
+            updateNotification(startWallTime)
+            startTimer(startElapsedTime)
 
             return outputFile
         } catch (e: Exception) {
             e.printStackTrace()
-            cleanupRecorder()
-            currentOutputFile?.delete()
-            currentOutputFile = null
-            _isRecording.value = false
-            recordingStartElapsedTime = 0L
-            recordingStartWallTime = 0L
+            releaseRecorder(pendingRecorder)
+            pendingFile?.delete()
+            synchronized(stateLock) {
+                activeSession = null
+                _isRecording.value = false
+            }
             stopTimer()
             stopForeground(STOP_FOREGROUND_REMOVE)
             // Retained state lets a late binding observe the failure, too.
@@ -162,68 +195,119 @@ class RecordingService : Service() {
     }
 
     suspend fun stopRecording(): File? {
-        if (!_isRecording.value) {
-            // An idle stop command (double tap, stale notification action) must not leave a
-            // started service behind. onDestroy reaches this path as well, where both calls
-            // are no-ops.
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-            return currentOutputFile
+        val session: RecordingSession?
+        val deferred: CompletableDeferred<File?>?
+        val existingStop: CompletableDeferred<File?>?
+
+        synchronized(stateLock) {
+            if (stoppingDeferred != null) {
+                existingStop = stoppingDeferred
+                session = null
+                deferred = null
+            } else {
+                existingStop = null
+                val current = activeSession
+                if (current == null) {
+                    // An idle stop command (double tap, stale notification action) must not leave a
+                    // started service behind. onDestroy reaches this path as well, where both calls
+                    // are no-ops.
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    session = null
+                    deferred = null
+                } else {
+                    session = current
+                    activeSession = null
+                    _isRecording.value = false
+                    _isStopping.value = true
+                    stopTimer()
+                    deferred = CompletableDeferred()
+                    stoppingDeferred = deferred
+                }
+            }
         }
 
-        val recordedFile = currentOutputFile
-        val startTime = recordingStartWallTime
+        if (existingStop != null) {
+            return existingStop.await()
+        }
+        if (session == null || deferred == null) {
+            return null
+        }
+
         val endTime = System.currentTimeMillis()
-        currentOutputFile = null
-        // Detach the recorder before leaving the main thread: a second stop while the file is
-        // being finalized must not touch the same instance.
-        val recorder = mediaRecorder
-        mediaRecorder = null
-        _isRecording.value = false
-        stopTimer()
 
         // MediaRecorder.stop() finalizes the container and can block on long recordings.
-        withContext(Dispatchers.IO) {
+        // Completing finalization inside Dispatchers.IO also ensures onDestroy()'s runBlocking
+        // can await the in-flight stop without deadlocking on the main thread.
+        return withContext(Dispatchers.IO) {
             try {
-                recorder?.stop()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                releaseRecorder(recorder)
-            }
-        }
+                try {
+                    session.recorder.stop()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    releaseRecorder(session.recorder)
+                }
 
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+                val storePair = resolveMeetingStore()
+                if (storePair != null) {
+                    val (scope, store) = storePair
+                    val rowId = session.pendingMeetingRow?.let { pending ->
+                        withTimeoutOrNull(MEETING_ROW_TIMEOUT_MS) { pending.await() }
+                    }
 
-        val app = application as? LastMeetingApp
-        if (app != null) {
-            val rowId = pendingMeetingRow?.let { deferred ->
-                withTimeoutOrNull(MEETING_ROW_TIMEOUT_MS) { deferred.await() }
-            }
-            pendingMeetingRow = null
-
-            val audioFile = recordedFile
-            if (audioFile != null && audioFile.exists() && audioFile.length() > 0L) {
-                app.applicationScope.launch {
-                    if (rowId != null) {
-                        app.meetingRepository.finishMeeting(rowId, endTime)
-                    } else {
-                        // The insert at start failed or never ran; fall back to the old path.
-                        app.meetingRepository.createMeeting(audioFile, startTime, endTime)
+                    val audioFile = session.outputFile
+                    if (audioFile.exists() && audioFile.length() > 0L) {
+                        scope.launch {
+                            if (rowId != null) {
+                                store.finishMeeting(rowId, endTime)
+                            } else {
+                                // The insert at start failed or never ran; fall back to the old path.
+                                store.createMeeting(audioFile, session.startWallTime, endTime)
+                            }
+                        }
+                    } else if (rowId != null) {
+                        scope.launch { store.discardMeeting(rowId) }
                     }
                 }
-            } else if (rowId != null) {
-                app.applicationScope.launch { app.meetingRepository.discardMeeting(rowId) }
+
+                session.outputFile
+            } finally {
+                synchronized(stateLock) {
+                    if (stoppingDeferred === deferred) {
+                        stoppingDeferred = null
+                        _isStopping.value = false
+                    }
+                    if (activeSession == null) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
+                }
+                deferred.complete(session.outputFile)
             }
         }
-
-        return recordedFile
     }
 
-    private fun cleanupRecorder() {
-        releaseRecorder(mediaRecorder)
-        mediaRecorder = null
+    private fun resolveMeetingStore(): Pair<CoroutineScope, MeetingSessionStore>? {
+        val storeOverride = meetingStoreOverride
+        if (storeOverride != null) {
+            return (persistenceScopeOverride ?: serviceScope) to storeOverride
+        }
+        val app = application as? LastMeetingApp ?: return null
+        val repo = app.meetingRepository
+        return app.applicationScope to object : MeetingSessionStore {
+            override suspend fun startMeeting(audioFile: File, startTime: Long): Long =
+                repo.startMeeting(audioFile, startTime)
+
+            override suspend fun finishMeeting(id: Long, endTime: Long) =
+                repo.finishMeeting(id, endTime)
+
+            override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long =
+                repo.createMeeting(audioFile, startTime, endTime)
+
+            override suspend fun discardMeeting(id: Long) =
+                repo.discardMeeting(id)
+        }
     }
 
     private fun releaseRecorder(recorder: AudioRecorder?) {
@@ -234,13 +318,13 @@ class RecordingService : Service() {
         }
     }
 
-    private fun startTimer() {
+    private fun startTimer(startElapsedTime: Long) {
         timerJob?.cancel()
         timerJob = serviceScope.launch {
             while (isActive && _isRecording.value) {
                 // The notification ticks itself via a chronometer; only the UI value is
                 // refreshed here, so recording does not re-post a notification every second.
-                _elapsedTimeSeconds.value = (SystemClock.elapsedRealtime() - recordingStartElapsedTime) / 1000
+                _elapsedTimeSeconds.value = (SystemClock.elapsedRealtime() - startElapsedTime) / 1000
                 delay(1000)
             }
         }
@@ -264,7 +348,7 @@ class RecordingService : Service() {
         manager?.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(preparing: Boolean = false): Notification {
+    private fun buildNotification(preparing: Boolean = false, startWallTime: Long = 0L): Notification {
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this,
@@ -295,7 +379,7 @@ class RecordingService : Service() {
                 } else {
                     // The system ticks the elapsed time itself, so the notification is posted once.
                     setUsesChronometer(true)
-                    setWhen(recordingStartWallTime)
+                    setWhen(startWallTime)
                 }
             }
             .addAction(
@@ -319,9 +403,9 @@ class RecordingService : Service() {
         }
     }
 
-    private fun updateNotification() {
+    private fun updateNotification(startWallTime: Long) {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-        manager?.notify(NOTIFICATION_ID, buildNotification())
+        manager?.notify(NOTIFICATION_ID, buildNotification(startWallTime = startWallTime))
     }
 
     override fun onDestroy() {

@@ -50,10 +50,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
 
+    private val _isStopping = MutableStateFlow(false)
+    val isStopping: StateFlow<Boolean> = _isStopping.asStateFlow()
+
     private val _elapsedSeconds = MutableStateFlow(0L)
     val elapsedSeconds: StateFlow<Long> = _elapsedSeconds.asStateFlow()
 
     private var isRecordingCollectorJob: Job? = null
+    private var isStoppingCollectorJob: Job? = null
     private var elapsedCollectorJob: Job? = null
     private var errorCollectorJob: Job? = null
     private var bindingRequested = false
@@ -75,6 +79,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isRecordingCollectorJob = viewModelScope.launch {
                 srv.isRecording.collect { rec ->
                     _isRecording.value = rec
+                }
+            }
+
+            isStoppingCollectorJob?.cancel()
+            isStoppingCollectorJob = viewModelScope.launch {
+                srv.isStopping.collect { stopping ->
+                    _isStopping.value = stopping
                 }
             }
 
@@ -100,10 +111,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         override fun onServiceDisconnected(name: ComponentName?) {
             isRecordingCollectorJob?.cancel()
+            isStoppingCollectorJob?.cancel()
             elapsedCollectorJob?.cancel()
             errorCollectorJob?.cancel()
             recordingService = null
             _isRecording.value = false
+            _isStopping.value = false
         }
     }
 
@@ -127,14 +140,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             bindingRequested = false
         }
         isRecordingCollectorJob?.cancel()
+        isStoppingCollectorJob?.cancel()
         elapsedCollectorJob?.cancel()
         errorCollectorJob?.cancel()
         recordingService = null
         _isRecording.value = false
+        _isStopping.value = false
         _elapsedSeconds.value = 0L
     }
 
     fun toggleRecording() {
+        if (_isStopping.value || recordingService?.isStopping?.value == true) {
+            return
+        }
         if (_isRecording.value) {
             stopRecording()
         } else {
