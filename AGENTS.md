@@ -1,14 +1,14 @@
 # Last Meeting - Project Specification & Technical Decisions
 
 ## Overview
-"Last Meeting" is an Android application designed to record meeting audio, transcribe it, and generate protocol summaries using any OpenAI-compatible multimodal API endpoint (e.g., OpenAI, OpenRouter, Gemini, Groq).
+"Last Meeting" is an Android application designed to record meeting audio, transcribe it, and generate protocol summaries using OpenAI or any OpenAI-compatible API endpoint (e.g., OpenAI, OpenRouter, Gemini, Groq).
 
 ---
 
 ## 1. Confirmed Decisions & Specifications
 
 ### Audio Format & Storage
-- **Audio Format**: `M4A` (AAC audio encoding in MPEG-4 container).
+- **Audio Format**: `M4A` (AAC audio encoding in MPEG-4 container, 32 kbps at 16 kHz mono so 1 hour is ~14.4 MB and stays below the 25 MB upload limit).
 - **Storage**: App-private storage (`context.filesDir/recordings/meeting_YYYYMMDD_HHMMSS.m4a`).
 - **Database**: Room Database storing meeting records:
   - `id` (Long / Primary Key)
@@ -30,13 +30,17 @@
 - `android:allowBackup="false"` is deliberate: the settings DataStore holds the API key, recordings are private and exceed the 25 MB backup quota, and a partial restore would leave meeting rows without their audio.
 - The API key is stored unencrypted in app-private storage. Keystore encryption was considered and dropped: it only guards against extraction on a rooted device, cannot be verified in CI (Robolectric has no `AndroidKeyStore`), and adds key-loss and migration risk.
 
-### AI Integration (Multimodal Chat Completions)
-- **API Standard**: Strictly use `/v1/chat/completions` (OpenAI Multimodal Chat Completions API format).
-- **Audio Payload**: Audio encoded as base64 in `input_audio` content payload (`type: "input_audio", input_audio: { data: "<base64>", format: "m4a" }`).
+### AI Integration
+- **Transcription**:
+  - **OpenAI (`api.openai.com`)**: Uses `POST /v1/audio/transcriptions` (`multipart/form-data`) sending the `.m4a` recording directly with `model = transcriptionModel` and `prompt = transcriptionSystemPrompt`.
+  - **Custom Multimodal Endpoints**: Uses `POST /v1/chat/completions` with audio encoded as base64 in `input_audio` content payload (`type: "input_audio", input_audio: { data: "<base64>", format: "m4a" }`).
+- **Protocol Generation**:
+  - Uses `POST /v1/chat/completions` with `model = protocolModel`, sending **text only** (`protocolSystemPrompt` and the meeting's existing `transcript` text). Protocol generation requires a transcript to exist first and never re-uploads the audio file.
 - **Configuration (DataStore Preferences)**:
   - `baseUrl` (default: `https://api.openai.com/v1/`)
   - `apiKey`
-  - `model` (default e.g., `gpt-4o-audio-preview` or configurable multimodal model)
+  - `transcriptionModel` (default: `gpt-4o-mini-transcribe`)
+  - `protocolModel` (default: `gpt-4o-mini`)
   - `transcriptionSystemPrompt` (default provided, customizable by user)
   - `protocolSystemPrompt` (default provided, customizable by user)
 
@@ -45,14 +49,14 @@
 - **Meeting Details View**:
   - Edit title
   - Trigger audio transcription via AI
-  - Trigger protocol creation via AI
+  - Trigger protocol creation via AI (based on the text transcript; prompts the user to transcribe first if no transcript exists yet)
   - Read transcript / protocol
   - Download audio, transcript (PDF), or protocol (PDF)
   - Share audio, transcript (PDF/text), or protocol (PDF/text)
   - Delete transcript individually (with confirmation dialog)
   - Delete protocol individually (with confirmation dialog)
   - Delete audio (deletes the entire meeting record and associated files, with confirmation dialog)
-- **Settings View**: Configure API Base URL, API Key, Multimodal Model Name, and System Prompts.
+- **Settings View**: Configure API Base URL, API Key, Transcription Model Name, Protocol Model Name, and System Prompts.
 
 ### Export & Sharing
 - **PDF Export**: Generated dynamically using Android `android.graphics.pdf.PdfDocument` and saved to `Downloads/LastMeeting/`. API 29+ writes through MediaStore; API 26-28 writes to the public Downloads folder directly and therefore needs `WRITE_EXTERNAL_STORAGE` (`android:maxSdkVersion="28"`), requested by the export action in `MeetingDetailsScreen` before the exporter runs.
