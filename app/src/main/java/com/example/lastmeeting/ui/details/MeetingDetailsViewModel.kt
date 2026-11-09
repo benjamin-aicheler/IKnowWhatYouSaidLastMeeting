@@ -211,6 +211,13 @@ class MeetingDetailsViewModel(
     }
 
     fun protocolize() {
+        val currentMeeting = meeting.value ?: return
+        if (currentMeeting.transcript.isNullOrBlank()) {
+            viewModelScope.launch {
+                _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_transcribe_first)))
+            }
+            return
+        }
         AiProcessingWorker.enqueue(
             context = app,
             meetingId = meetingId,

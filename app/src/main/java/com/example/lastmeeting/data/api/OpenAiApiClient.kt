@@ -1,15 +1,20 @@
 package com.example.lastmeeting.data.api
 
+import com.example.lastmeeting.data.preferences.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import java.io.File
 import java.io.IOException
@@ -33,6 +38,24 @@ internal data class ChatMessageContent(
 )
 
 @Serializable
+internal data class AudioTranscriptionResponse(
+    val text: String? = null,
+    val error: ApiErrorDetail? = null
+)
+
+@Serializable
+internal data class ChatRequestPayload(
+    val model: String,
+    val messages: List<ChatRequestMessage>
+)
+
+@Serializable
+internal data class ChatRequestMessage(
+    val role: String,
+    val content: String
+)
+
+@Serializable
 internal data class ApiErrorResponse(
     val error: ApiErrorDetail? = null
 )
@@ -51,7 +74,8 @@ internal class ApiHttpException(val code: Int, message: String) : IOException(me
 class OpenAiApiClient(
     connectTimeoutSeconds: Long = 60,
     readTimeoutSeconds: Long = 300,
-    writeTimeoutSeconds: Long = 120
+    writeTimeoutSeconds: Long = 120,
+    internal val httpClient: OkHttpClient? = null
 ) {
 
     private val json = Json {
@@ -59,13 +83,13 @@ class OpenAiApiClient(
         isLenient = true
     }
 
-    private val client = OkHttpClient.Builder()
+    private val client = httpClient ?: OkHttpClient.Builder()
         .connectTimeout(connectTimeoutSeconds, TimeUnit.SECONDS)
         .readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
         .writeTimeout(writeTimeoutSeconds, TimeUnit.SECONDS)
         .build()
 
-    suspend fun generateFromAudio(
+    suspend fun transcribeAudio(
         baseUrl: String,
         apiKey: String,
         model: String,
@@ -81,54 +105,196 @@ class OpenAiApiClient(
                 return@withContext Result.failure(IllegalArgumentException("Audio file does not exist or is empty."))
             }
 
-            val resolvedModel = model.ifBlank { "gpt-4o-audio-preview" }
-            val body = createStreamingAudioRequestBody(
+            val resolvedModel = SettingsRepository.resolveModel(
+                stored = model,
+                defaultModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL
+            )
+            val normalizedBaseUrl = formatBaseUrl(baseUrl)
+
+            if (isOpenAiHost(normalizedBaseUrl)) {
+                val body = createMultipartTranscriptionRequestBody(
+                    model = resolvedModel,
+                    prompt = prompt,
+                    audioFile = audioFile
+                )
+                val request = Request.Builder()
+                    .url("${normalizedBaseUrl}audio/transcriptions")
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .post(body)
+                    .build()
+
+                executeTranscriptionRequest(request)
+            } else {
+                val body = createStreamingAudioRequestBody(
+                    model = resolvedModel,
+                    prompt = prompt,
+                    audioFile = audioFile
+                )
+                val request = Request.Builder()
+                    .url("${normalizedBaseUrl}chat/completions")
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
+                    .post(body)
+                    .build()
+
+                executeChatCompletionRequest(request)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun generateFromAudio(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        prompt: String,
+        audioFile: File
+    ): Result<String> = transcribeAudio(
+        baseUrl = baseUrl,
+        apiKey = apiKey,
+        model = model,
+        prompt = prompt,
+        audioFile = audioFile
+    )
+
+    suspend fun generateFromText(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        systemPrompt: String,
+        userText: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (apiKey.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("API key is missing."))
+            }
+
+            if (userText.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Transcript text is missing."))
+            }
+
+            val resolvedModel = SettingsRepository.resolveModel(
+                stored = model,
+                defaultModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL
+            )
+            val normalizedBaseUrl = formatBaseUrl(baseUrl)
+            val body = createTextChatRequestBody(
                 model = resolvedModel,
-                prompt = prompt,
-                audioFile = audioFile
+                systemPrompt = systemPrompt,
+                userText = userText
             )
 
-            val formattedBaseUrl = baseUrl.trim().let {
-                if (it.endsWith("/")) it else "$it/"
-            }
-            val endpointUrl = "${formattedBaseUrl}chat/completions"
-
             val request = Request.Builder()
-                .url(endpointUrl)
+                .url("${normalizedBaseUrl}chat/completions")
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .post(body)
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body.string()
-
-                if (!response.isSuccessful) {
-                    val errorMessage = try {
-                        val errorObj = json.decodeFromString<ApiErrorResponse>(responseBody)
-                        errorObj.error?.message?.takeIf { it.isNotBlank() } ?: responseBody
-                    } catch (_: Exception) {
-                        "HTTP ${response.code}: ${response.message}"
-                    }
-                    return@withContext Result.failure(ApiHttpException(response.code, errorMessage))
-                }
-
-                val completionResponse = json.decodeFromString<ChatCompletionResponse>(responseBody)
-                val textResult = completionResponse.choices
-                    .firstOrNull()
-                    ?.message
-                    ?.content
-                    ?.trim()
-
-                if (!textResult.isNullOrEmpty()) {
-                    Result.success(textResult)
-                } else {
-                    Result.failure(IOException("No response content generated from API."))
-                }
-            }
+            executeChatCompletionRequest(request)
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun executeTranscriptionRequest(request: Request): Result<String> {
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body.string()
+
+            if (!response.isSuccessful) {
+                return Result.failure(parseErrorException(response.code, response.message, responseBody))
+            }
+
+            val transcriptionResponse = json.decodeFromString<AudioTranscriptionResponse>(responseBody)
+            val textResult = transcriptionResponse.text?.trim()
+
+            return if (!textResult.isNullOrEmpty()) {
+                Result.success(textResult)
+            } else {
+                Result.failure(IOException("No response content generated from API."))
+            }
+        }
+    }
+
+    private fun executeChatCompletionRequest(request: Request): Result<String> {
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body.string()
+
+            if (!response.isSuccessful) {
+                return Result.failure(parseErrorException(response.code, response.message, responseBody))
+            }
+
+            val completionResponse = json.decodeFromString<ChatCompletionResponse>(responseBody)
+            val textResult = completionResponse.choices
+                .firstOrNull()
+                ?.message
+                ?.content
+                ?.trim()
+
+            return if (!textResult.isNullOrEmpty()) {
+                Result.success(textResult)
+            } else {
+                Result.failure(IOException("No response content generated from API."))
+            }
+        }
+    }
+
+    private fun parseErrorException(code: Int, httpMessage: String, responseBody: String): ApiHttpException {
+        val errorMessage = try {
+            val errorObj = json.decodeFromString<ApiErrorResponse>(responseBody)
+            errorObj.error?.message?.takeIf { it.isNotBlank() } ?: responseBody
+        } catch (_: Exception) {
+            "HTTP $code: $httpMessage"
+        }
+        return ApiHttpException(code, errorMessage)
+    }
+
+    internal fun formatBaseUrl(baseUrl: String): String =
+        baseUrl.trim().ifBlank { SettingsRepository.DEFAULT_BASE_URL }.let {
+            if (it.endsWith("/")) it else "$it/"
+        }
+
+    internal fun isOpenAiHost(baseUrl: String): Boolean {
+        val host = formatBaseUrl(baseUrl).toHttpUrlOrNull()?.host?.lowercase() ?: return false
+        return host == "api.openai.com" || host.endsWith(".api.openai.com")
+    }
+
+    internal fun createMultipartTranscriptionRequestBody(
+        model: String,
+        prompt: String,
+        audioFile: File
+    ): MultipartBody {
+        val builder = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart(
+                "file",
+                audioFile.name,
+                audioFile.asRequestBody("audio/mp4".toMediaType())
+            )
+            .addFormDataPart("model", model)
+
+        if (prompt.isNotBlank()) {
+            builder.addFormDataPart("prompt", prompt)
+        }
+
+        return builder.build()
+    }
+
+    internal fun createTextChatRequestBody(
+        model: String,
+        systemPrompt: String,
+        userText: String
+    ): RequestBody {
+        val messages = buildList {
+            if (systemPrompt.isNotBlank()) {
+                add(ChatRequestMessage(role = "system", content = systemPrompt))
+            }
+            add(ChatRequestMessage(role = "user", content = userText))
+        }
+        val payload = ChatRequestPayload(model = model, messages = messages)
+        val encoded = json.encodeToString(ChatRequestPayload.serializer(), payload)
+        return encoded.toRequestBody("application/json; charset=utf-8".toMediaType())
     }
 
     internal fun createStreamingAudioRequestBody(

@@ -84,12 +84,14 @@
     <string name="msg_protocol_success">Protokoll erfolgreich erstellt.</string>
     <string name="msg_ai_error">KI-Fehler: %1$s</string>
     <string name="msg_missing_api_key">Bitte konfigurieren Sie zuerst Ihren API-Schlüssel in den Einstellungen.</string>
+    <string name="msg_transcribe_first">Bitte transkribieren Sie die Sitzung zuerst, bevor Sie ein Protokoll erstellen.</string>
     <string name="msg_exported_pdf">PDF wurde unter Downloads/LastMeeting gespeichert.</string>
 
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI-kompatible API Base-URL</string>
     <string name="label_api_key">API-Schlüssel</string>
-    <string name="label_model">Multimodaler KI-Modellname</string>
+    <string name="label_transcription_model">KI-Modellname für Transkription</string>
+    <string name="label_protocol_model">KI-Modellname für Protokoll</string>
     <string name="label_transcription_prompt">Systemprompt für Transkription</string>
     <string name="label_protocol_prompt">Systemprompt für Protokoll</string>
     <string name="action_save_settings">Einstellungen speichern</string>
@@ -97,5 +99,5 @@
 
     <!-- Default Prompts -->
     <string name="default_transcription_prompt">Du bist ein präziser Assistent für Audiotranskription. Höre dir das bereitgestellte Sitzungsaudio an und erstelle ein wörtliches, genaues Transkript. Gib ausschließlich den Transkripttext aus.</string>
-    <string name="default_protocol_prompt">Du bist ein professioneller Sitzungsassistent. Höre dir das bereitgestellte Sitzungsaudio an und erstelle ein meisterhaftes, strukturiertes Sitzungsprotokoll. Enthalte: 1. Zusammenfassung, 2. Hauptdiskussionspunkte, 3. Wichtige Entscheidungen und 4. Nächste Schritte &amp; Aufgaben.</string>
+    <string name="default_protocol_prompt">Du bist ein professioneller Sitzungsassistent. Lies das bereitgestellte Sitzungstranskript und erstelle ein klares, strukturiertes Sitzungsprotokoll. Enthalte: 1. Zusammenfassung, 2. Hauptdiskussionspunkte, 3. Wichtige Entscheidungen und 4. Nächste Schritte &amp; Aufgaben.</string>
 </resources>
