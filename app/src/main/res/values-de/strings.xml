@@ -12,6 +12,7 @@
     <string name="action_stop_recording">Aufnahme stoppen</string>
     <string name="recording_in_progress">Aufnahme läuft…</string>
     <string name="recording_preparing">Aufnahme wird vorbereitet…</string>
+    <string name="recording_stopping">Aufnahme wird gestoppt…</string>
     <string name="msg_recording_start_failed">Die Aufnahme konnte nicht gestartet werden. Bitte versuchen Sie es erneut, während die App geöffnet ist.</string>
     <string name="msg_recording_permission_required">Für die Aufnahme ist die Mikrofonberechtigung erforderlich. Bitte erlauben Sie den Mikrofonzugriff und versuchen Sie es erneut.</string>
     <string name="notification_channel_recording_name">Sitzungsaufnahme</string>

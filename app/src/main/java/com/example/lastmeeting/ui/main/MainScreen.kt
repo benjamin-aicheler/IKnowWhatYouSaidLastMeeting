@@ -87,6 +87,7 @@ fun MainScreen(
     val meetings by viewModel.meetings.collectAsState()
     val viewMode by viewModel.viewMode.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
+    val isStopping by viewModel.isStopping.collectAsState()
     val elapsedSeconds by viewModel.elapsedSeconds.collectAsState()
     val recordingError by viewModel.recordingError.collectAsState()
 
@@ -142,18 +143,32 @@ fun MainScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { handleRecordClick() },
-                containerColor = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                onClick = { if (!isStopping) handleRecordClick() },
+                containerColor = when {
+                    isStopping -> MaterialTheme.colorScheme.surfaceVariant
+                    isRecording -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.primary
+                }
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
-                        contentDescription = if (isRecording) stringResource(R.string.action_stop_recording) else stringResource(R.string.action_record)
+                        imageVector = if (isRecording || isStopping) Icons.Default.Stop else Icons.Default.Mic,
+                        contentDescription = when {
+                            isStopping -> stringResource(R.string.recording_stopping)
+                            isRecording -> stringResource(R.string.action_stop_recording)
+                            else -> stringResource(R.string.action_record)
+                        }
                     )
-                    if (isRecording) {
+                    if (isStopping) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.recording_stopping),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    } else if (isRecording) {
                         Spacer(modifier = Modifier.width(8.dp))
                         val locale = LocalLocale.current.platformLocale
                         val mins = elapsedSeconds / 60
