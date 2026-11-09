@@ -1,20 +1,20 @@
 # Last Meeting 🎙️
 
-**Last Meeting** is a modern Android app built with **Jetpack Compose** and **Material 3** to record meeting audio, automatically transcribe it, and generate structured protocol summaries using any OpenAI-compatible multimodal API endpoint (`/v1/chat/completions`).
+**Last Meeting** is a modern Android app built with **Jetpack Compose** and **Material 3** to record meeting audio, automatically transcribe it, and generate structured protocol summaries using OpenAI or any OpenAI-compatible API endpoint.
 
 ---
 
 ## ✨ Features
 
 - 🎙️ **Persistent Audio Recording**:
-  - Records audio in high-quality `M4A` (AAC) format.
+  - Records speech-optimized `M4A` (AAC, 32 kbps / 16 kHz mono, ~14.4 MB/hour so a full 1-hour meeting stays well below the 25 MB upload limit).
   - Powered by an Android **Foreground Service** with persistent notification and microphone service type—recording continues uninterrupted when the screen turns off or the app is minimized.
   - Crash-safe: the meeting is saved when recording starts, so an interrupted recording is recovered on the next app start instead of leaving an unreachable audio file behind.
 
-- 🤖 **Multimodal AI Transcription & Protocolization**:
-  - Leverages standard OpenAI Multimodal Chat Completions (`/v1/chat/completions`) by sending base64-encoded audio.
-  - Compatible with **OpenAI**, **OpenRouter**, **Gemini**, **Groq**, or any OpenAI-compatible custom API endpoint.
-  - Separate system prompts for verbatim transcription and executive protocol creation.
+- 🤖 **AI Transcription & Protocolization**:
+  - Transcribes `.m4a` recordings directly via OpenAI's `/v1/audio/transcriptions` endpoint, while preserving `/v1/chat/completions` (`input_audio` base64 `m4a`) for custom multimodal endpoints (e.g., **OpenRouter**, **Gemini**).
+  - Generates structured protocols from the **text transcript** via `/v1/chat/completions`—audio is only uploaded once.
+  - Separate configurable models and system prompts for transcription (`gpt-4o-mini-transcribe` default) and executive protocol creation (`gpt-4o-mini` default).
 
 - 📅 **List & Calendar Views**:
   - Toggle seamlessly between a sorted **List View** and an organized **Calendar View** on the main screen.
@@ -104,7 +104,7 @@ To use AI transcription or protocolization:
 1. Open the app and tap the **Settings** icon (⚙️) in the top right.
 2. Enter your **OpenAI Compatible Base URL** (default: `https://api.openai.com/v1/`).
 3. Enter your **API Key**.
-4. Enter the **Multimodal Model Name** (e.g. `gpt-4o-audio-preview`, `gpt-4o`, `google/gemini-flash-1.5`, etc.).
+4. Enter the **Transcription AI Model Name** (default: `gpt-4o-mini-transcribe`) and **Protocol AI Model Name** (default: `gpt-4o-mini`).
 5. (Optional) Customize the **Transcription** or **Protocol** system prompts.
 6. Tap **Save Settings**.
 

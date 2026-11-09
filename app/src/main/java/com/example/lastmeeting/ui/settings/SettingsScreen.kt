@@ -45,7 +45,8 @@ fun SettingsScreen(
 
     var baseUrl by remember(settings) { mutableStateOf(settings.baseUrl) }
     var apiKey by remember(settings) { mutableStateOf(settings.apiKey) }
-    var model by remember(settings) { mutableStateOf(settings.model) }
+    var transcriptionModel by remember(settings) { mutableStateOf(settings.transcriptionModel) }
+    var protocolModel by remember(settings) { mutableStateOf(settings.protocolModel) }
     var transcriptionPrompt by remember(settings) { mutableStateOf(settings.transcriptionPrompt) }
     var protocolPrompt by remember(settings) { mutableStateOf(settings.protocolPrompt) }
 
@@ -96,9 +97,17 @@ fun SettingsScreen(
             )
 
             OutlinedTextField(
-                value = model,
-                onValueChange = { model = it },
-                label = { Text(stringResource(R.string.label_model)) },
+                value = transcriptionModel,
+                onValueChange = { transcriptionModel = it },
+                label = { Text(stringResource(R.string.label_transcription_model)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            OutlinedTextField(
+                value = protocolModel,
+                onValueChange = { protocolModel = it },
+                label = { Text(stringResource(R.string.label_protocol_model)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -128,7 +137,8 @@ fun SettingsScreen(
                     viewModel.saveSettings(
                         baseUrl = baseUrl,
                         apiKey = apiKey,
-                        model = model,
+                        transcriptionModel = transcriptionModel,
+                        protocolModel = protocolModel,
                         transcriptionPrompt = transcriptionPrompt,
                         protocolPrompt = protocolPrompt
                     )

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.R
 import com.example.lastmeeting.data.preferences.ApiSettings
+import com.example.lastmeeting.data.preferences.SettingsRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,9 +24,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = ApiSettings(
-            baseUrl = "https://api.openai.com/v1/",
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
             apiKey = "",
-            model = "gpt-4o-audio-preview",
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
             transcriptionPrompt = "",
             protocolPrompt = ""
         )
@@ -37,7 +39,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun saveSettings(
         baseUrl: String,
         apiKey: String,
-        model: String,
+        transcriptionModel: String,
+        protocolModel: String,
         transcriptionPrompt: String,
         protocolPrompt: String
     ) {
@@ -45,7 +48,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             repository.saveSettings(
                 baseUrl = baseUrl,
                 apiKey = apiKey,
-                model = model,
+                transcriptionModel = transcriptionModel,
+                protocolModel = protocolModel,
                 transcriptionPrompt = transcriptionPrompt,
                 protocolPrompt = protocolPrompt
             )

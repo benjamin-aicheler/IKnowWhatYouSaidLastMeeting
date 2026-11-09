@@ -84,12 +84,14 @@
     <string name="msg_protocol_success">Protocol generated successfully.</string>
     <string name="msg_ai_error">AI Error: %1$s</string>
     <string name="msg_missing_api_key">Please configure your API Key in Settings first.</string>
+    <string name="msg_transcribe_first">Please transcribe the meeting first before generating a protocol.</string>
     <string name="msg_exported_pdf">PDF exported to Downloads/LastMeeting.</string>
 
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI Compatible API Base URL</string>
     <string name="label_api_key">API Key</string>
-    <string name="label_model">Multimodal AI Model Name</string>
+    <string name="label_transcription_model">Transcription AI Model Name</string>
+    <string name="label_protocol_model">Protocol AI Model Name</string>
     <string name="label_transcription_prompt">Transcription System Prompt</string>
     <string name="label_protocol_prompt">Protocol System Prompt</string>
     <string name="action_save_settings">Save Settings</string>
@@ -97,5 +99,5 @@
 
     <!-- Default Prompts -->
     <string name="default_transcription_prompt">You are a precise audio transcription assistant. Listen to the provided meeting audio and write an accurate verbatim transcript. Output only the transcript text.</string>
-    <string name="default_protocol_prompt">You are an executive meeting assistant. Listen to the provided meeting audio and create a clear, structured meeting protocol. Include: 1. Executive Summary, 2. Key Discussion Topics, 3. Key Decisions Made, and 4. Action Items &amp; Next Steps.</string>
+    <string name="default_protocol_prompt">You are an executive meeting assistant. Read the provided meeting transcript and create a clear, structured meeting protocol. Include: 1. Executive Summary, 2. Key Discussion Topics, 3. Key Decisions Made, and 4. Action Items &amp; Next Steps.</string>
 </resources>
