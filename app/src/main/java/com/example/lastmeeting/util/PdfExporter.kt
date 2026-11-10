@@ -67,14 +67,30 @@ object PdfExporter {
         textContent: String
     ): Result<File> {
         return try {
-            val fileName = buildFileName(title, typeLabel, "pdf")
-            val outFile = File(context.cacheDir, fileName)
-            FileOutputStream(outFile).use { stream ->
+            val outFile = writeCachePdf(context.cacheDir, title, typeLabel) { stream ->
                 writePdfDocument(title, typeLabel, textContent, stream)
             }
             Result.success(outFile)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    internal fun writeCachePdf(
+        cacheDir: File,
+        title: String,
+        typeLabel: String,
+        writeDocument: (OutputStream) -> Unit
+    ): File {
+        val prefix = buildFileName(title, typeLabel, "pdf").removeSuffix(".pdf") + "_"
+        // Reserve a new path for every share: existing URI grants must keep their contents.
+        val outFile = File.createTempFile(prefix, ".pdf", cacheDir)
+        try {
+            FileOutputStream(outFile).use(writeDocument)
+            return outFile
+        } catch (e: Exception) {
+            outFile.delete()
+            throw e
         }
     }
 
