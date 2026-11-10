@@ -113,7 +113,7 @@ To use AI transcription or protocolization:
 ## 🔐 Data & Privacy
 
 - Recordings, transcripts and protocols stay on the device in app-private storage.
-- Android auto-backup and device-to-device transfer are disabled (`android:allowBackup="false"`), so no app data is uploaded to Google.
+- Android cloud backup is disabled (`android:allowBackup="false"`). Explicit Android 12+ device-transfer and cloud-backup rules, plus legacy backup rules, exclude every app storage domain, including recordings, the meeting database, and the settings DataStore containing the API key.
 - The API key is stored in app-private storage, unencrypted, and is only sent to the endpoint you configure.
 - A deletion that cannot remove the audio file keeps the meeting record, so a file is never left behind without a reference.
 

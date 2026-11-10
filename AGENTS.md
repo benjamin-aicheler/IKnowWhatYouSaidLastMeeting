@@ -28,7 +28,8 @@
 - `reconcileRecordings()` runs in `LastMeetingApp.onCreate`: unfinished rows are closed from the audio file's last modification time, rows whose file vanished are deleted, and `.m4a` files without a row are adopted (visible and deletable). It never deletes files from storage and is idempotent.
 
 ### Backup
-- `android:allowBackup="false"` is deliberate: the settings DataStore holds the API key, recordings are private and exceed the 25 MB backup quota, and a partial restore would leave meeting rows without their audio.
+- `android:allowBackup="false"` deliberately disables cloud backup: the settings DataStore holds the API key, recordings are private and can exceed the 25 MB backup quota, and a partial restore would leave meeting rows without their audio.
+- `android:dataExtractionRules="@xml/data_extraction_rules"` explicitly excludes every storage domain from Android 12+ cloud backup and device-to-device transfer; some manufacturers permit device transfer despite `allowBackup="false"`. `android:fullBackupContent="@xml/backup_rules"` supplies matching exclusions for Android 11 and lower. Keep all nine domain exclusions in each policy: `root` alone does not cover the independently traversed `file` and `database` domains. This excludes recordings, the Room database (including transcripts/protocols), and the settings DataStore/API key.
 - The API key is stored unencrypted in app-private storage. Keystore encryption was considered and dropped: it only guards against extraction on a rooted device, cannot be verified in CI (Robolectric has no `AndroidKeyStore`), and adds key-loss and migration risk.
 
 ### AI Integration
