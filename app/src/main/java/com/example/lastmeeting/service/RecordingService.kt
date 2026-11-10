@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.MainActivity
 import com.example.lastmeeting.R
+import com.example.lastmeeting.repository.MeetingRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -42,10 +43,37 @@ import java.util.Date
 import java.util.Locale
 
 internal interface MeetingSessionStore {
+    fun createRecordingFile(recordingsDir: File): File =
+        RecordingService.createUniqueRecordingFile(recordingsDir).also(::registerLiveRecording)
+    fun registerLiveRecording(audioFile: File) {}
+    fun unregisterLiveRecording(audioFile: File) {}
     suspend fun startMeeting(audioFile: File, startTime: Long): Long
     suspend fun finishMeeting(id: Long, endTime: Long)
     suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long
     suspend fun discardMeeting(id: Long)
+}
+
+internal fun MeetingRepository.asSessionStore(): MeetingSessionStore = object : MeetingSessionStore {
+    override fun createRecordingFile(recordingsDir: File): File =
+        this@asSessionStore.createRecordingFile(recordingsDir)
+
+    override fun registerLiveRecording(audioFile: File) =
+        this@asSessionStore.registerLiveRecording(audioFile)
+
+    override fun unregisterLiveRecording(audioFile: File) =
+        this@asSessionStore.unregisterLiveRecording(audioFile)
+
+    override suspend fun startMeeting(audioFile: File, startTime: Long): Long =
+        this@asSessionStore.startMeeting(audioFile, startTime)
+
+    override suspend fun finishMeeting(id: Long, endTime: Long) =
+        this@asSessionStore.finishMeeting(id, endTime)
+
+    override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long =
+        this@asSessionStore.createMeeting(audioFile, startTime, endTime)
+
+    override suspend fun discardMeeting(id: Long) =
+        this@asSessionStore.discardMeeting(id)
 }
 
 class RecordingService : Service() {
@@ -116,6 +144,7 @@ class RecordingService : Service() {
 
         var pendingFile: File? = null
         var pendingRecorder: AudioRecorder? = null
+        val storePair = resolveMeetingStore()
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 throw SecurityException("Microphone permission is required")
@@ -124,13 +153,8 @@ class RecordingService : Service() {
             startForegroundServiceNotification()
 
             val recordingsDir = File(filesDir, "recordings")
-            check(recordingsDir.isDirectory || recordingsDir.mkdirs()) { "Cannot create recordings directory" }
-            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            // A failed retry or rapid stop/start must never overwrite another recording.
-            val timestampFile = File(recordingsDir, "meeting_$timeStamp.m4a")
-            val outputFile = if (timestampFile.createNewFile()) timestampFile else {
-                File.createTempFile("meeting_${timeStamp}_", ".m4a", recordingsDir)
-            }
+            val outputFile = storePair?.second?.createRecordingFile(recordingsDir)
+                ?: createUniqueRecordingFile(recordingsDir)
             pendingFile = outputFile
 
             val recorder = recorderFactory()
@@ -146,7 +170,7 @@ class RecordingService : Service() {
 
             // Persist the meeting right away: if the process dies mid-recording, the audio stays
             // reachable instead of lying on disk with nothing pointing at it.
-            val pendingMeetingRow = resolveMeetingStore()?.let { (scope, store) ->
+            val pendingMeetingRow = storePair?.let { (scope, store) ->
                 scope.async {
                     runCatching { store.startMeeting(outputFile, startWallTime) }
                         .getOrNull()
@@ -172,6 +196,7 @@ class RecordingService : Service() {
             e.printStackTrace()
             releaseRecorder(pendingRecorder)
             pendingFile?.delete()
+            pendingFile?.let { file -> storePair?.second?.unregisterLiveRecording(file) }
             synchronized(stateLock) {
                 activeSession = null
                 _isRecording.value = false
@@ -254,21 +279,27 @@ class RecordingService : Service() {
                     val (scope, store) = storePair
                     val rowId = session.pendingMeetingRow?.let { pending ->
                         withTimeoutOrNull(MEETING_ROW_TIMEOUT_MS) { pending.await() }
+                            .also { if (it == null) pending.cancel() }
                     }
 
                     val audioFile = session.outputFile
-                    if (audioFile.exists() && audioFile.length() > 0L) {
-                        scope.launch {
-                            if (rowId != null) {
-                                store.finishMeeting(rowId, endTime)
-                            } else {
-                                // The insert at start failed or never ran; fall back to the old path.
-                                store.createMeeting(audioFile, session.startWallTime, endTime)
+                    val persistenceJob = scope.launch {
+                        try {
+                            if (audioFile.exists() && audioFile.length() > 0L) {
+                                if (rowId != null) {
+                                    store.finishMeeting(rowId, endTime)
+                                } else {
+                                    // The insert at start failed or never ran; fall back to the old path.
+                                    store.createMeeting(audioFile, session.startWallTime, endTime)
+                                }
+                            } else if (rowId != null) {
+                                store.discardMeeting(rowId)
                             }
+                        } finally {
+                            store.unregisterLiveRecording(audioFile)
                         }
-                    } else if (rowId != null) {
-                        scope.launch { store.discardMeeting(rowId) }
                     }
+                    withTimeoutOrNull(MEETING_ROW_TIMEOUT_MS) { persistenceJob.join() }
                 }
 
                 session.outputFile
@@ -294,20 +325,7 @@ class RecordingService : Service() {
             return (persistenceScopeOverride ?: serviceScope) to storeOverride
         }
         val app = application as? LastMeetingApp ?: return null
-        val repo = app.meetingRepository
-        return app.applicationScope to object : MeetingSessionStore {
-            override suspend fun startMeeting(audioFile: File, startTime: Long): Long =
-                repo.startMeeting(audioFile, startTime)
-
-            override suspend fun finishMeeting(id: Long, endTime: Long) =
-                repo.finishMeeting(id, endTime)
-
-            override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long =
-                repo.createMeeting(audioFile, startTime, endTime)
-
-            override suspend fun discardMeeting(id: Long) =
-                repo.discardMeeting(id)
-        }
+        return (persistenceScopeOverride ?: app.applicationScope) to app.meetingRepository.asSessionStore()
     }
 
     private fun releaseRecorder(recorder: AudioRecorder?) {
@@ -424,5 +442,17 @@ class RecordingService : Service() {
         const val NOTIFICATION_ID = 1001
         const val ACTION_START_RECORDING = "com.example.lastmeeting.action.START_RECORDING"
         const val ACTION_STOP_RECORDING = "com.example.lastmeeting.action.STOP_RECORDING"
+
+        internal fun createUniqueRecordingFile(recordingsDir: File): File {
+            check(recordingsDir.isDirectory || recordingsDir.mkdirs()) { "Cannot create recordings directory" }
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            // A failed retry or rapid stop/start must never overwrite another recording.
+            val timestampFile = File(recordingsDir, "meeting_$timeStamp.m4a")
+            return if (timestampFile.createNewFile()) {
+                timestampFile
+            } else {
+                File.createTempFile("meeting_${timeStamp}_", ".m4a", recordingsDir)
+            }
+        }
     }
 }

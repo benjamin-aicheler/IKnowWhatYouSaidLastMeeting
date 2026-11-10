@@ -25,88 +25,213 @@ class MeetingRepository(
     private val recordingsDir: File = File(context.filesDir, "recordings")
 ) {
 
+    private val recordingLock = Any()
+    private val activeRecordingPaths = mutableSetOf<String>()
+    private val activeRecordingIdsToPaths = mutableMapOf<Long, String>()
+    private val activeReconciliations = mutableListOf<MutableSet<String>>()
+
     val allMeetings: Flow<List<MeetingEntity>> = meetingDao.getAllMeetings()
 
     fun getMeetingById(id: Long): Flow<MeetingEntity?> = meetingDao.getMeetingById(id)
 
-    suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long =
-        meetingDao.insertMeeting(
-            MeetingEntity(
-                title = defaultTitle(startTime),
-                startTime = startTime,
-                endTime = endTime,
-                audioFilePath = audioFile.absolutePath,
-                transcript = null,
-                protocol = null,
-                createdAt = System.currentTimeMillis()
+    /**
+     * Creates a unique `.m4a` output file and marks its path as live atomically so a concurrent
+     * [reconcileRecordings] scan never sees the file on disk as an unowned orphan.
+     */
+    fun createRecordingFile(recordingsDir: File = this.recordingsDir, now: Date = Date()): File =
+        synchronized(recordingLock) {
+            check(recordingsDir.isDirectory || recordingsDir.mkdirs()) { "Cannot create recordings directory" }
+            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(now)
+            // A failed retry or rapid stop/start must never overwrite another recording.
+            val timestampFile = File(recordingsDir, "meeting_$timeStamp.m4a")
+            val outputFile = if (timestampFile.createNewFile()) {
+                timestampFile
+            } else {
+                File.createTempFile("meeting_${timeStamp}_", ".m4a", recordingsDir)
+            }
+            markRecordingLiveLocked(outputFile.absolutePath)
+            outputFile
+        }
+
+    /**
+     * Marks [audioFile] as belonging to an active recording session in this process so
+     * [reconcileRecordings] neither closes its unfinished row nor adopts the file as an orphan.
+     */
+    fun registerLiveRecording(audioFile: File) {
+        synchronized(recordingLock) {
+            markRecordingLiveLocked(audioFile.absolutePath)
+        }
+    }
+
+    fun unregisterLiveRecording(audioFile: File) {
+        synchronized(recordingLock) {
+            val path = audioFile.absolutePath
+            activeRecordingPaths.remove(path)
+            val iterator = activeRecordingIdsToPaths.entries.iterator()
+            while (iterator.hasNext()) {
+                if (iterator.next().value == path) {
+                    iterator.remove()
+                }
+            }
+        }
+    }
+
+    private fun markRecordingLiveLocked(path: String) {
+        activeRecordingPaths.add(path)
+        activeReconciliations.forEach { it.add(path) }
+    }
+
+    suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long {
+        val path = audioFile.absolutePath
+        synchronized(recordingLock) {
+            activeReconciliations.forEach { it.add(path) }
+        }
+        return try {
+            meetingDao.insertMeeting(
+                MeetingEntity(
+                    title = defaultTitle(startTime),
+                    startTime = startTime,
+                    endTime = endTime,
+                    audioFilePath = path,
+                    transcript = null,
+                    protocol = null,
+                    createdAt = System.currentTimeMillis()
+                )
             )
-        )
+        } finally {
+            synchronized(recordingLock) {
+                activeReconciliations.forEach { it.add(path) }
+                activeRecordingPaths.remove(path)
+                val iterator = activeRecordingIdsToPaths.entries.iterator()
+                while (iterator.hasNext()) {
+                    if (iterator.next().value == path) {
+                        iterator.remove()
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * Inserts the row as soon as the recorder runs, so a recording interrupted by process death
      * keeps a meeting instead of leaving a file nothing points at. [MeetingEntity.endTime] stays
      * 0 until [finishMeeting] closes it, which keeps it out of the meeting list meanwhile.
      */
-    suspend fun startMeeting(audioFile: File, startTime: Long): Long =
-        meetingDao.insertMeeting(
+    suspend fun startMeeting(audioFile: File, startTime: Long): Long {
+        val path = audioFile.absolutePath
+        synchronized(recordingLock) {
+            activeReconciliations.forEach { it.add(path) }
+        }
+        val id = meetingDao.insertMeeting(
             MeetingEntity(
                 title = defaultTitle(startTime),
                 startTime = startTime,
                 endTime = 0L,
-                audioFilePath = audioFile.absolutePath,
+                audioFilePath = path,
                 transcript = null,
                 protocol = null,
                 createdAt = System.currentTimeMillis()
             )
         )
+        synchronized(recordingLock) {
+            activeReconciliations.forEach { it.add(path) }
+            if (path in activeRecordingPaths) {
+                activeRecordingIdsToPaths[id] = path
+            }
+        }
+        return id
+    }
 
     suspend fun finishMeeting(id: Long, endTime: Long) {
-        meetingDao.finishMeeting(id, endTime)
+        try {
+            meetingDao.finishMeeting(id, endTime)
+        } finally {
+            synchronized(recordingLock) {
+                activeRecordingIdsToPaths.remove(id)?.let { path ->
+                    activeRecordingPaths.remove(path)
+                }
+            }
+        }
     }
 
     /** Drops the row of a recording that never produced playable audio. */
     suspend fun discardMeeting(id: Long) {
-        meetingDao.deleteMeeting(id)
+        try {
+            meetingDao.deleteMeeting(id)
+        } finally {
+            synchronized(recordingLock) {
+                activeRecordingIdsToPaths.remove(id)?.let { path ->
+                    activeRecordingPaths.remove(path)
+                }
+            }
+        }
     }
 
     /**
      * Repairs what a killed process leaves behind: unfinished rows are closed with the audio
      * file's last modification time, or dropped when the audio is gone; recordings that never got
      * a row are adopted so they are visible and deletable instead of sitting on disk unseen.
+     *
+     * Recordings belonging to an active session in this process are skipped so a concurrent
+     * startup scan never publishes a running recording or adopts its file a second time.
      */
     suspend fun reconcileRecordings(): Int {
-        var changes = 0
+        val skippedPaths = synchronized(recordingLock) {
+            activeRecordingPaths.toMutableSet().also { activeReconciliations.add(it) }
+        }
+        try {
+            var changes = 0
 
-        meetingDao.getUnfinishedMeetings().forEach { meeting ->
-            val audioFile = File(meeting.audioFilePath)
-            if (audioFile.exists()) {
-                meetingDao.finishMeeting(meeting.id, maxOf(audioFile.lastModified(), meeting.startTime))
-            } else {
-                meetingDao.deleteMeeting(meeting.id)
+            meetingDao.getUnfinishedMeetings().forEach { meeting ->
+                if (isLiveOrTouchedDuringReconcile(meeting.audioFilePath, skippedPaths)) {
+                    return@forEach
+                }
+                val audioFile = File(meeting.audioFilePath)
+                if (audioFile.exists()) {
+                    meetingDao.finishMeeting(meeting.id, maxOf(audioFile.lastModified(), meeting.startTime))
+                } else {
+                    meetingDao.deleteMeeting(meeting.id)
+                }
+                changes++
             }
-            changes++
-        }
 
-        val knownPaths = meetingDao.getAllAudioPaths().toSet()
-        val orphans = recordingsDir.listFiles { file -> file.isFile && file.extension == "m4a" }.orEmpty()
-        orphans.filterNot { it.absolutePath in knownPaths }.forEach { orphan ->
-            val timestamp = maxOf(orphan.lastModified(), 0L)
-            meetingDao.insertMeeting(
-                MeetingEntity(
-                    title = defaultTitle(timestamp),
-                    startTime = timestamp,
-                    endTime = timestamp,
-                    audioFilePath = orphan.absolutePath,
-                    transcript = null,
-                    protocol = null,
-                    createdAt = System.currentTimeMillis()
-                )
-            )
-            changes++
-        }
+            val knownPaths = meetingDao.getAllAudioPaths().toSet()
+            val orphans = synchronized(recordingLock) {
+                recordingsDir.listFiles { file -> file.isFile && file.extension == "m4a" }.orEmpty().toList()
+            }
+            orphans
+                .filterNot { orphan ->
+                    orphan.absolutePath in knownPaths ||
+                        isLiveOrTouchedDuringReconcile(orphan.absolutePath, skippedPaths)
+                }
+                .forEach { orphan ->
+                    val timestamp = maxOf(orphan.lastModified(), 0L)
+                    meetingDao.insertMeeting(
+                        MeetingEntity(
+                            title = defaultTitle(timestamp),
+                            startTime = timestamp,
+                            endTime = timestamp,
+                            audioFilePath = orphan.absolutePath,
+                            transcript = null,
+                            protocol = null,
+                            createdAt = System.currentTimeMillis()
+                        )
+                    )
+                    changes++
+                }
 
-        return changes
+            return changes
+        } finally {
+            synchronized(recordingLock) {
+                activeReconciliations.remove(skippedPaths)
+            }
+        }
     }
+
+    private fun isLiveOrTouchedDuringReconcile(path: String, skippedPaths: Set<String>): Boolean =
+        synchronized(recordingLock) {
+            path in skippedPaths || path in activeRecordingPaths
+        }
 
     private fun defaultTitle(startTime: Long): String {
         val dateString = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(startTime))
