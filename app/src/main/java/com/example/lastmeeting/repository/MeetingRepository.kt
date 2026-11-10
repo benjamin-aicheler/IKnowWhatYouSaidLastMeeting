@@ -245,9 +245,11 @@ class MeetingRepository(
         }
     }
 
-    suspend fun transcribeMeeting(id: Long): Result<String> {
+    suspend fun transcribeMeeting(id: Long, generation: Long): Result<AiGenerationOutcome> {
         val meeting = meetingDao.getMeetingByIdDirect(id)
-            ?: return Result.failure(Exception("Meeting not found."))
+        if (meeting == null || meeting.transcriptGeneration != generation) {
+            return Result.success(AiGenerationOutcome.Discarded)
+        }
 
         val audioFile = File(meeting.audioFilePath)
         if (!audioFile.exists()) {
@@ -267,12 +269,20 @@ class MeetingRepository(
             audioFile = audioFile
         )
 
-        return result.onSuccess { text -> meetingDao.updateTranscript(id, text) }
+        return result.map { text ->
+            if (meetingDao.updateTranscript(id, text, generation) > 0) {
+                AiGenerationOutcome.Stored(text)
+            } else {
+                AiGenerationOutcome.Discarded
+            }
+        }
     }
 
-    suspend fun protocolizeMeeting(id: Long): Result<String> {
+    suspend fun protocolizeMeeting(id: Long, generation: Long): Result<AiGenerationOutcome> {
         val meeting = meetingDao.getMeetingByIdDirect(id)
-            ?: return Result.failure(Exception("Meeting not found."))
+        if (meeting == null || meeting.protocolGeneration != generation) {
+            return Result.success(AiGenerationOutcome.Discarded)
+        }
 
         val transcript = meeting.transcript?.trim()
         if (transcript.isNullOrEmpty()) {
@@ -292,16 +302,18 @@ class MeetingRepository(
             userText = transcript
         )
 
-        return result.onSuccess { text -> meetingDao.updateProtocol(id, text) }
+        return result.map { text ->
+            if (meetingDao.updateProtocol(id, text, generation) > 0) {
+                AiGenerationOutcome.Stored(text)
+            } else {
+                AiGenerationOutcome.Discarded
+            }
+        }
     }
 
-    suspend fun deleteTranscript(id: Long) {
-        meetingDao.updateTranscript(id, null)
-    }
+    suspend fun deleteTranscript(id: Long): Long? = meetingDao.deleteTranscript(id)
 
-    suspend fun deleteProtocol(id: Long) {
-        meetingDao.updateProtocol(id, null)
-    }
+    suspend fun deleteProtocol(id: Long): Long? = meetingDao.deleteProtocol(id)
 
     suspend fun deleteMeeting(id: Long): Result<Unit> {
         val meeting = meetingDao.getMeetingByIdDirect(id)

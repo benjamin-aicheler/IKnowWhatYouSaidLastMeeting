@@ -1,5 +1,6 @@
 package com.example.lastmeeting.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -14,5 +15,9 @@ data class MeetingEntity(
     val audioFilePath: String,
     val transcript: String? = null,
     val protocol: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0")
+    val transcriptGeneration: Long = 0,
+    @ColumnInfo(defaultValue = "0")
+    val protocolGeneration: Long = 0
 )

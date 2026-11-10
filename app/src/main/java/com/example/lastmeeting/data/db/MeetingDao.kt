@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -31,11 +32,31 @@ interface MeetingDao {
     @Query("UPDATE meetings SET title = :title WHERE id = :id")
     suspend fun updateTitle(id: Long, title: String)
 
-    @Query("UPDATE meetings SET transcript = :transcript WHERE id = :id")
-    suspend fun updateTranscript(id: Long, transcript: String?)
+    @Query("UPDATE meetings SET transcript = :transcript WHERE id = :id AND transcriptGeneration = :generation")
+    suspend fun updateTranscript(id: Long, transcript: String, generation: Long): Int
 
-    @Query("UPDATE meetings SET protocol = :protocol WHERE id = :id")
-    suspend fun updateProtocol(id: Long, protocol: String?)
+    @Query("UPDATE meetings SET protocol = :protocol WHERE id = :id AND protocolGeneration = :generation")
+    suspend fun updateProtocol(id: Long, protocol: String, generation: Long): Int
+
+    @Query("UPDATE meetings SET transcript = NULL, transcriptGeneration = transcriptGeneration + 1 WHERE id = :id")
+    suspend fun clearTranscript(id: Long)
+
+    @Query("UPDATE meetings SET protocol = NULL, protocolGeneration = protocolGeneration + 1 WHERE id = :id")
+    suspend fun clearProtocol(id: Long)
+
+    @Transaction
+    suspend fun deleteTranscript(id: Long): Long? {
+        val generation = getMeetingByIdDirect(id)?.transcriptGeneration ?: return null
+        clearTranscript(id)
+        return generation
+    }
+
+    @Transaction
+    suspend fun deleteProtocol(id: Long): Long? {
+        val generation = getMeetingByIdDirect(id)?.protocolGeneration ?: return null
+        clearProtocol(id)
+        return generation
+    }
 
     @Query("UPDATE meetings SET endTime = :endTime WHERE id = :id")
     suspend fun finishMeeting(id: Long, endTime: Long)

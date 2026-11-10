@@ -6,10 +6,15 @@ import com.example.lastmeeting.data.api.OpenAiApiClient
 import com.example.lastmeeting.data.db.MeetingDao
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.data.preferences.SettingsRepository
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -32,6 +37,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
@@ -85,7 +93,7 @@ class MeetingRepositoryAiTest {
             )
         )
 
-        val result = repository.protocolizeMeeting(id)
+        val result = repository.protocolizeMeeting(id, 0L)
 
         assertTrue(result.isFailure)
         assertEquals(app.getString(R.string.msg_transcribe_first), result.exceptionOrNull()?.message)
@@ -140,7 +148,7 @@ class MeetingRepositoryAiTest {
             )
         )
 
-        val result = repository.protocolizeMeeting(id)
+        val result = repository.protocolizeMeeting(id, 0L)
 
         assertTrue(result.isSuccess)
         assertEquals("Generated Protocol Summary", dao.getMeetingByIdDirect(id)?.protocol)
@@ -155,6 +163,147 @@ class MeetingRepositoryAiTest {
             "Speaker A: Welcome everyone.\nSpeaker B: Let's review the roadmap.",
             messages[1].jsonObject["content"]?.jsonPrimitive?.content
         )
+    }
+
+    @Test
+    fun deletedTranscriptStaysEmptyWhenOldResponseArrives() = runBlocking {
+        delayedResponse(transcriptTask = true)
+    }
+
+    @Test
+    fun deletedProtocolStaysEmptyWhenOldResponseArrives() = runBlocking {
+        delayedResponse(transcriptTask = false)
+    }
+
+    @Test
+    fun oldResponsesCannotOverwriteAnExplicitGenerationAfterDeletion() = runBlocking {
+        delayedResponse(transcriptTask = true, replaceBeforeResponse = true)
+        delayedResponse(transcriptTask = false, replaceBeforeResponse = true)
+    }
+
+    @Test
+    fun deletingTheOtherFieldDoesNotInvalidateTheResponse() = runBlocking {
+        delayedResponse(transcriptTask = true, deleteOtherField = true)
+        delayedResponse(transcriptTask = false, deleteOtherField = true)
+    }
+
+    private suspend fun delayedResponse(
+        transcriptTask: Boolean,
+        replaceBeforeResponse: Boolean = false,
+        deleteOtherField: Boolean = false
+    ) = coroutineScope {
+        val requestStarted = CompletableDeferred<Unit>()
+        val releaseResponse = CountDownLatch(1)
+        val calls = AtomicInteger()
+        val repository = configuredRepository(Interceptor { chain ->
+            val first = calls.incrementAndGet() == 1
+            if (first) {
+                requestStarted.complete(Unit)
+                check(releaseResponse.await(15, TimeUnit.SECONDS)) { "Response was not released" }
+            }
+            response(chain.request(), if (first) "Old response" else "New response")
+        })
+        val id = insertAiMeeting()
+        val pending = async(Dispatchers.Default) { generate(repository, id, transcriptTask, 0L) }
+        try {
+            withTimeout(10_000) { requestStarted.await() }
+            val deletedGeneration = if (transcriptTask != deleteOtherField) {
+                repository.deleteTranscript(id)
+            } else {
+                repository.deleteProtocol(id)
+            }
+            assertEquals(0L, deletedGeneration)
+            if (replaceBeforeResponse) {
+                assertEquals(AiGenerationOutcome.Stored("New response"), generate(repository, id, transcriptTask, 1L).getOrThrow())
+            }
+        } finally {
+            releaseResponse.countDown()
+        }
+        val outcome = pending.await().getOrThrow()
+        val meeting = dao.getMeetingByIdDirect(id)!!
+        val content = if (transcriptTask) meeting.transcript else meeting.protocol
+        if (deleteOtherField) {
+            assertEquals(AiGenerationOutcome.Stored("Old response"), outcome)
+            assertEquals("Old response", content)
+        } else {
+            assertEquals(AiGenerationOutcome.Discarded, outcome)
+            assertEquals(if (replaceBeforeResponse) "New response" else null, content)
+            if (!replaceBeforeResponse) {
+                assertEquals(AiGenerationOutcome.Stored("New response"), generate(repository, id, transcriptTask, 1L).getOrThrow())
+            }
+        }
+    }
+
+    @Test
+    fun queuedJobsKeepTheirOriginalVersionAcrossRepositoryRecreation() = runBlocking {
+        val calls = AtomicInteger()
+        val interceptor = Interceptor { calls.incrementAndGet(); error("Stale job called the network") }
+        val repository = configuredRepository(interceptor)
+        for (transcriptTask in listOf(true, false)) {
+            val id = insertAiMeeting()
+            if (transcriptTask) repository.deleteTranscript(id) else repository.deleteProtocol(id)
+            val restarted = configuredRepository(interceptor)
+            assertEquals(AiGenerationOutcome.Discarded, generate(restarted, id, transcriptTask, 0L).getOrThrow())
+            val meeting = dao.getMeetingByIdDirect(id)!!
+            assertNull(if (transcriptTask) meeting.transcript else meeting.protocol)
+        }
+        assertEquals(0, calls.get())
+    }
+
+    @Test
+    fun retryAfterDeletionCannotAdoptTheNewVersion() = runBlocking {
+        for (transcriptTask in listOf(true, false)) {
+            val calls = AtomicInteger()
+            val interceptor = Interceptor { chain ->
+                if (calls.incrementAndGet() == 1) {
+                    response(chain.request(), "Unavailable").newBuilder().code(503).message("Unavailable").build()
+                } else {
+                    response(chain.request(), "New response")
+                }
+            }
+            val repository = configuredRepository(interceptor)
+            val id = insertAiMeeting()
+            assertTrue(generate(repository, id, transcriptTask, 0L).isFailure)
+            if (transcriptTask) repository.deleteTranscript(id) else repository.deleteProtocol(id)
+            val restarted = configuredRepository(interceptor)
+            assertEquals(AiGenerationOutcome.Discarded, generate(restarted, id, transcriptTask, 0L).getOrThrow())
+            assertEquals(1, calls.get())
+            assertEquals(AiGenerationOutcome.Stored("New response"), generate(restarted, id, transcriptTask, 1L).getOrThrow())
+            assertEquals(2, calls.get())
+        }
+    }
+
+    private suspend fun configuredRepository(interceptor: Interceptor): MeetingRepository {
+        settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "test-key",
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe", protocolPrompt = "Summarize"
+        )
+        return MeetingRepository(app, dao, settingsRepository,
+            apiClient = OpenAiApiClient(httpClient = OkHttpClient.Builder().addInterceptor(interceptor).build()))
+    }
+
+    private suspend fun insertAiMeeting(): Long {
+        val audio = File.createTempFile("ai-test-", ".m4a", app.filesDir).apply { writeText("Audio") }
+        return dao.insertMeeting(MeetingEntity(
+            title = "Meeting", startTime = 1L, endTime = 2L, audioFilePath = audio.absolutePath,
+            transcript = "Existing transcript", protocol = "Existing protocol"
+        ))
+    }
+
+    private suspend fun generate(repository: MeetingRepository, id: Long, transcriptTask: Boolean, generation: Long) =
+        if (transcriptTask) repository.transcribeMeeting(id, generation) else repository.protocolizeMeeting(id, generation)
+
+    private fun response(request: Request, text: String): Response {
+        val body = if (request.url.encodedPath.endsWith("/audio/transcriptions")) {
+            """{"text":"$text"}"""
+        } else {
+            """{"choices":[{"message":{"content":"$text"}}]}"""
+        }
+        return Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+            .body(body.toResponseBody("application/json".toMediaType())).build()
     }
 
     private class FakeMeetingDao : MeetingDao {
@@ -186,12 +335,28 @@ class MeetingRepositoryAiTest {
             items.value[id]?.let { items.value = items.value + (id to it.copy(title = title)) }
         }
 
-        override suspend fun updateTranscript(id: Long, transcript: String?) {
-            items.value[id]?.let { items.value = items.value + (id to it.copy(transcript = transcript)) }
+        override suspend fun updateTranscript(id: Long, transcript: String, generation: Long): Int {
+            val meeting = items.value[id]?.takeIf { it.transcriptGeneration == generation } ?: return 0
+            items.value = items.value + (id to meeting.copy(transcript = transcript))
+            return 1
         }
 
-        override suspend fun updateProtocol(id: Long, protocol: String?) {
-            items.value[id]?.let { items.value = items.value + (id to it.copy(protocol = protocol)) }
+        override suspend fun updateProtocol(id: Long, protocol: String, generation: Long): Int {
+            val meeting = items.value[id]?.takeIf { it.protocolGeneration == generation } ?: return 0
+            items.value = items.value + (id to meeting.copy(protocol = protocol))
+            return 1
+        }
+
+        override suspend fun clearTranscript(id: Long) {
+            items.value[id]?.let {
+                items.value = items.value + (id to it.copy(transcript = null, transcriptGeneration = it.transcriptGeneration + 1))
+            }
+        }
+
+        override suspend fun clearProtocol(id: Long) {
+            items.value[id]?.let {
+                items.value = items.value + (id to it.copy(protocol = null, protocolGeneration = it.protocolGeneration + 1))
+            }
         }
 
         override suspend fun finishMeeting(id: Long, endTime: Long) {

@@ -13,11 +13,13 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.Operation
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.R
+import com.example.lastmeeting.repository.AiGenerationOutcome
 import java.util.concurrent.TimeUnit
 
 class AiProcessingWorker(
@@ -29,6 +31,9 @@ class AiProcessingWorker(
         val meetingId = inputData.getLong(KEY_MEETING_ID, -1L)
         val taskType = inputData.getString(KEY_TASK_TYPE) ?: return Result.failure()
         if (meetingId <= 0L) return Result.failure()
+        // Work persisted by an older app version has no deletion version; never rebase it.
+        val generation = inputData.getLong(KEY_GENERATION, -1L)
+        if (generation < 0L) return Result.success(workDataOf(KEY_DISCARDED to true))
 
         val app = applicationContext as? LastMeetingApp
             ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Application context unavailable."))
@@ -40,13 +45,15 @@ class AiProcessingWorker(
         promoteToForeground(taskType)
 
         val apiResult = when (taskType) {
-            TASK_TRANSCRIBE -> repository.transcribeMeeting(meetingId)
-            TASK_PROTOCOLIZE -> repository.protocolizeMeeting(meetingId)
+            TASK_TRANSCRIBE -> repository.transcribeMeeting(meetingId, generation)
+            TASK_PROTOCOLIZE -> repository.protocolizeMeeting(meetingId, generation)
             else -> return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Unknown AI task type."))
         }
 
         return apiResult.fold(
-            onSuccess = { Result.success() },
+            onSuccess = { outcome ->
+                Result.success(workDataOf(KEY_DISCARDED to (outcome == AiGenerationOutcome.Discarded)))
+            },
             onFailure = { error ->
                 if (AiRetryPolicy.isRetryable(error, runAttemptCount)) {
                     Result.retry()
@@ -114,6 +121,8 @@ class AiProcessingWorker(
         const val KEY_MEETING_ID = "meeting_id"
         const val KEY_TASK_TYPE = "task_type"
         const val KEY_ERROR_MESSAGE = "error_message"
+        const val KEY_GENERATION = "generation"
+        const val KEY_DISCARDED = "discarded"
 
         const val TASK_TRANSCRIBE = "TRANSCRIBE"
         const val TASK_PROTOCOLIZE = "PROTOCOLIZE"
@@ -122,27 +131,40 @@ class AiProcessingWorker(
         private const val NOTIFICATION_ID = 2001
         private const val BACKOFF_SECONDS = 30L
 
-        fun uniqueWorkName(meetingId: Long, taskType: String): String =
+        fun workTag(meetingId: Long, taskType: String): String =
             "ai_processing_${meetingId}_$taskType"
 
-        fun enqueue(context: Context, meetingId: Long, taskType: String) {
+        fun uniqueWorkName(meetingId: Long, taskType: String, generation: Long): String =
+            "${workTag(meetingId, taskType)}_$generation"
+
+        fun cancel(context: Context, meetingId: Long, taskType: String, generation: Long): Operation {
+            val workManager = WorkManager.getInstance(context)
+            // Also stop legacy work without a generation, without touching newer requests.
+            workManager.cancelUniqueWork(workTag(meetingId, taskType))
+            return workManager.cancelUniqueWork(uniqueWorkName(meetingId, taskType, generation))
+        }
+
+        fun enqueue(context: Context, meetingId: Long, taskType: String, generation: Long): Operation {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
             val request = OneTimeWorkRequestBuilder<AiProcessingWorker>()
+                .addTag(workTag(meetingId, taskType))
+                .addTag(uniqueWorkName(meetingId, taskType, generation))
                 .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_SECONDS, TimeUnit.SECONDS)
                 .setInputData(
                     workDataOf(
                         KEY_MEETING_ID to meetingId,
-                        KEY_TASK_TYPE to taskType
+                        KEY_TASK_TYPE to taskType,
+                        KEY_GENERATION to generation
                     )
                 )
                 .build()
 
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                uniqueWorkName(meetingId, taskType),
+            return WorkManager.getInstance(context).enqueueUniqueWork(
+                uniqueWorkName(meetingId, taskType, generation),
                 ExistingWorkPolicy.KEEP,
                 request
             )

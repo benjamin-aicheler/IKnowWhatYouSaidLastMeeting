@@ -19,6 +19,7 @@
   - `transcript` (String, nullable)
   - `protocol` (String, nullable)
   - `createdAt` (Long)
+  - `transcriptGeneration` / `protocolGeneration` (Long, default `0`; persisted deletion versions)
 
 ### Recording Lifecycle
 - The meeting row is inserted as soon as the recorder runs, not after it stops, so an interrupted recording keeps a meeting instead of leaving an audio file nothing points at.
@@ -66,6 +67,7 @@
 - **Audio Recording**: Android `ForegroundService` with notification and `foregroundServiceType="microphone"`. Recording will not stop when the screen turns off or the app is minimized.
 - **AI Processing (Transcribing & Protocolizing)**: Background WorkManager / Service tasks with proper lifecycle management so network requests finish reliably when screen turns off. The worker runs in the foreground where the platform allows it.
 - **Retries**: `AiRetryPolicy` retries HTTP 429, 5xx and network failures, at most three runs with 30 s/60 s exponential backoff. Other 4xx, configuration and serialization failures fail immediately. There is no second retry loop in the HTTP client, so attempts are not multiplied.
+- **Deleting AI results**: Deleting a transcript or protocol atomically clears that field and increments its generation. AI work captures the generation when enqueued, retains it across retries, and writes only if that generation still matches. Work names include the generation so cancelling stale work cannot cancel or block a new explicit request. Stale results and legacy jobs without a generation are discarded quietly. Room migration 1→2 preserves existing meetings and initializes both generations to `0`.
 
 ### Localization & Multi-Language Support
 - **Languages Supported**: English (`res/values/strings.xml`) and German (`res/values-de/strings.xml`).
