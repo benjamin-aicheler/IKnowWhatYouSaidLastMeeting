@@ -18,7 +18,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -44,24 +45,32 @@ class MeetingDetailsViewModel(
             initialValue = null
         )
 
-    private val transcribeWorkFlow = workManager.getWorkInfosForUniqueWorkFlow(
-        AiProcessingWorker.uniqueWorkName(meetingId, AiProcessingWorker.TASK_TRANSCRIBE)
+    private val transcribeWorkFlow = workManager.getWorkInfosByTagFlow(
+        AiProcessingWorker.workTag(meetingId, AiProcessingWorker.TASK_TRANSCRIBE)
     )
 
-    private val protocolizeWorkFlow = workManager.getWorkInfosForUniqueWorkFlow(
-        AiProcessingWorker.uniqueWorkName(meetingId, AiProcessingWorker.TASK_PROTOCOLIZE)
+    private val protocolizeWorkFlow = workManager.getWorkInfosByTagFlow(
+        AiProcessingWorker.workTag(meetingId, AiProcessingWorker.TASK_PROTOCOLIZE)
     )
 
-    val isTranscribing: StateFlow<Boolean> = transcribeWorkFlow
-        .map { infos -> infos.any { !it.state.isFinished } }
+    val isTranscribing: StateFlow<Boolean> = combine(transcribeWorkFlow, meeting) { infos, current ->
+        val name = current?.let {
+            AiProcessingWorker.uniqueWorkName(meetingId, AiProcessingWorker.TASK_TRANSCRIBE, it.transcriptGeneration)
+        }
+        infos.any { !it.state.isFinished && name in it.tags }
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = false
         )
 
-    val isProtocolizing: StateFlow<Boolean> = protocolizeWorkFlow
-        .map { infos -> infos.any { !it.state.isFinished } }
+    val isProtocolizing: StateFlow<Boolean> = combine(protocolizeWorkFlow, meeting) { infos, current ->
+        val name = current?.let {
+            AiProcessingWorker.uniqueWorkName(meetingId, AiProcessingWorker.TASK_PROTOCOLIZE, it.protocolGeneration)
+        }
+        infos.any { !it.state.isFinished && name in it.tags }
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -80,16 +89,19 @@ class MeetingDetailsViewModel(
     init {
         observeWorkCompletion(
             workFlow = transcribeWorkFlow,
+            taskType = AiProcessingWorker.TASK_TRANSCRIBE,
             successMessageRes = R.string.msg_transcript_success
         )
         observeWorkCompletion(
             workFlow = protocolizeWorkFlow,
+            taskType = AiProcessingWorker.TASK_PROTOCOLIZE,
             successMessageRes = R.string.msg_protocol_success
         )
     }
 
     private fun observeWorkCompletion(
         workFlow: kotlinx.coroutines.flow.Flow<List<WorkInfo>>,
+        taskType: String,
         successMessageRes: Int
     ) {
         val trackedRuns = WorkRunTracker()
@@ -97,14 +109,22 @@ class MeetingDetailsViewModel(
             workFlow.collect { infos ->
                 infos.forEach { info ->
                     if (trackedRuns.record(info.id, info.state.isFinished)) {
-                        reportCompletion(info, successMessageRes)
+                        reportCompletion(info, taskType, successMessageRes)
                     }
                 }
             }
         }
     }
 
-    private suspend fun reportCompletion(info: WorkInfo, successMessageRes: Int) {
+    private suspend fun reportCompletion(info: WorkInfo, taskType: String, successMessageRes: Int) {
+        val current = repository.getMeetingById(meetingId).first() ?: return
+        val generation = if (taskType == AiProcessingWorker.TASK_TRANSCRIBE) {
+            current.transcriptGeneration
+        } else {
+            current.protocolGeneration
+        }
+        if (AiProcessingWorker.uniqueWorkName(meetingId, taskType, generation) !in info.tags) return
+        if (info.outputData.getBoolean(AiProcessingWorker.KEY_DISCARDED, false)) return
         when (info.state) {
             WorkInfo.State.SUCCEEDED -> {
                 _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(successMessageRes)))
@@ -203,26 +223,21 @@ class MeetingDetailsViewModel(
     }
 
     fun transcribe() {
-        AiProcessingWorker.enqueue(
-            context = app,
-            meetingId = meetingId,
-            taskType = AiProcessingWorker.TASK_TRANSCRIBE
-        )
+        viewModelScope.launch {
+            val current = repository.getMeetingById(meetingId).first() ?: return@launch
+            AiProcessingWorker.enqueue(app, meetingId, AiProcessingWorker.TASK_TRANSCRIBE, current.transcriptGeneration)
+        }
     }
 
     fun protocolize() {
-        val currentMeeting = meeting.value ?: return
-        if (currentMeeting.transcript.isNullOrBlank()) {
-            viewModelScope.launch {
+        viewModelScope.launch {
+            val current = repository.getMeetingById(meetingId).first() ?: return@launch
+            if (current.transcript.isNullOrBlank()) {
                 _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_transcribe_first)))
+                return@launch
             }
-            return
+            AiProcessingWorker.enqueue(app, meetingId, AiProcessingWorker.TASK_PROTOCOLIZE, current.protocolGeneration)
         }
-        AiProcessingWorker.enqueue(
-            context = app,
-            meetingId = meetingId,
-            taskType = AiProcessingWorker.TASK_PROTOCOLIZE
-        )
     }
 
     fun downloadAudio() {
@@ -297,14 +312,18 @@ class MeetingDetailsViewModel(
 
     fun deleteTranscript() {
         viewModelScope.launch {
-            repository.deleteTranscript(meetingId)
+            repository.deleteTranscript(meetingId)?.let { generation ->
+                AiProcessingWorker.cancel(app, meetingId, AiProcessingWorker.TASK_TRANSCRIBE, generation)
+            }
             _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_transcript_deleted)))
         }
     }
 
     fun deleteProtocol() {
         viewModelScope.launch {
-            repository.deleteProtocol(meetingId)
+            repository.deleteProtocol(meetingId)?.let { generation ->
+                AiProcessingWorker.cancel(app, meetingId, AiProcessingWorker.TASK_PROTOCOLIZE, generation)
+            }
             _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_protocol_deleted)))
         }
     }

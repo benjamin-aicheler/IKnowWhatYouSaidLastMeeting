@@ -4,10 +4,12 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [MeetingEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class MeetingDatabase : RoomDatabase() {
@@ -15,6 +17,13 @@ abstract class MeetingDatabase : RoomDatabase() {
     abstract fun meetingDao(): MeetingDao
 
     companion object {
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE meetings ADD COLUMN transcriptGeneration INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE meetings ADD COLUMN protocolGeneration INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var INSTANCE: MeetingDatabase? = null
 
@@ -24,7 +33,7 @@ abstract class MeetingDatabase : RoomDatabase() {
                     context.applicationContext,
                     MeetingDatabase::class.java,
                     "last_meeting_db"
-                ).build()
+                ).addMigrations(MIGRATION_1_2).build()
                 INSTANCE = instance
                 instance
             }

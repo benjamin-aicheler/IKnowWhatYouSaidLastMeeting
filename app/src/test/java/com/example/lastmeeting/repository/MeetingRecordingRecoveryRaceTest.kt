@@ -244,15 +244,33 @@ class MeetingRecordingRecoveryRaceTest {
             }
         }
 
-        override suspend fun updateTranscript(id: Long, transcript: String?) {
+        override suspend fun updateTranscript(id: Long, transcript: String, generation: Long): Int =
             synchronized(lock) {
-                items.value[id]?.let { items.value = items.value + (id to it.copy(transcript = transcript)) }
+                val meeting = items.value[id]?.takeIf { it.transcriptGeneration == generation } ?: return@synchronized 0
+                items.value = items.value + (id to meeting.copy(transcript = transcript))
+                1
+            }
+
+        override suspend fun updateProtocol(id: Long, protocol: String, generation: Long): Int =
+            synchronized(lock) {
+                val meeting = items.value[id]?.takeIf { it.protocolGeneration == generation } ?: return@synchronized 0
+                items.value = items.value + (id to meeting.copy(protocol = protocol))
+                1
+            }
+
+        override suspend fun clearTranscript(id: Long) {
+            synchronized(lock) {
+                items.value[id]?.let {
+                    items.value = items.value + (id to it.copy(transcript = null, transcriptGeneration = it.transcriptGeneration + 1))
+                }
             }
         }
 
-        override suspend fun updateProtocol(id: Long, protocol: String?) {
+        override suspend fun clearProtocol(id: Long) {
             synchronized(lock) {
-                items.value[id]?.let { items.value = items.value + (id to it.copy(protocol = protocol)) }
+                items.value[id]?.let {
+                    items.value = items.value + (id to it.copy(protocol = null, protocolGeneration = it.protocolGeneration + 1))
+                }
             }
         }
 
