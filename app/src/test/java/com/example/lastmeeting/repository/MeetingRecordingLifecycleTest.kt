@@ -114,6 +114,60 @@ class MeetingRecordingLifecycleTest {
         assertEquals(2, repository.allMeetings.first().size)
     }
 
+    @Test
+    fun reconciliationSkipsRegisteredLiveRecordingWhileRecoveringEarlierSession() = runBlocking {
+        val crashedFile = recording("interrupted_prev.m4a").apply { setLastModified(5_000L) }
+        val crashedId = repository.startMeeting(crashedFile, startTime = 1_000L)
+        val orphanFile = recording("orphan_prev.m4a").apply { setLastModified(6_000L) }
+
+        val liveFile = repository.createRecordingFile(recordingsDir).apply {
+            writeText("live audio")
+            setLastModified(9_000L)
+        }
+        val liveId = repository.startMeeting(liveFile, startTime = 8_000L)
+
+        assertEquals(2, repository.reconcileRecordings())
+
+        assertEquals(0L, dao.getMeetingByIdDirect(liveId)?.endTime ?: -1L)
+        val visibleDuringRecording = repository.allMeetings.first()
+        assertEquals(2, visibleDuringRecording.size)
+        assertTrue(visibleDuringRecording.none { it.audioFilePath == liveFile.absolutePath })
+        assertEquals(5_000L, dao.getMeetingByIdDirect(crashedId)?.endTime ?: -1L)
+        assertTrue(visibleDuringRecording.any { it.audioFilePath == orphanFile.absolutePath })
+
+        repository.finishMeeting(liveId, endTime = 68_000L)
+
+        val visibleAfterStop = repository.allMeetings.first()
+        assertEquals(3, visibleAfterStop.size)
+        val liveRows = visibleAfterStop.filter { it.audioFilePath == liveFile.absolutePath }
+        assertEquals(1, liveRows.size)
+        assertEquals(8_000L, liveRows.single().startTime)
+        assertEquals(68_000L, liveRows.single().endTime)
+    }
+
+    @Test
+    fun reconciliationSkipsLiveFileBeforeItsRowIsInserted() = runBlocking {
+        val liveFile = repository.createRecordingFile(recordingsDir).apply {
+            writeText("live audio")
+            setLastModified(10_000L)
+        }
+
+        assertEquals(0, repository.reconcileRecordings())
+        assertTrue(repository.allMeetings.first().isEmpty())
+
+        val liveId = repository.startMeeting(liveFile, startTime = 9_000L)
+        assertTrue(repository.allMeetings.first().isEmpty())
+
+        repository.finishMeeting(liveId, endTime = 70_000L)
+
+        val meetings = repository.allMeetings.first()
+        assertEquals(1, meetings.size)
+        assertEquals(liveId, meetings.single().id)
+        assertEquals(9_000L, meetings.single().startTime)
+        assertEquals(70_000L, meetings.single().endTime)
+        assertEquals(1, dao.getAllAudioPaths().count { it == liveFile.absolutePath })
+    }
+
     private fun recording(name: String): File =
         File(recordingsDir, name).apply { writeText("audio") }
 }
