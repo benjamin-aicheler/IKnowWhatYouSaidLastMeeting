@@ -32,8 +32,8 @@ class AiProcessingWorkerSchedulingTest {
         WorkManagerTestInitHelper.initializeTestWorkManager(app,
             Configuration.Builder().setExecutor(SynchronousExecutor()).setTaskExecutor(SynchronousExecutor())
                 .setWorkerFactory(object : WorkerFactory() {
-                    override fun createWorker(context: Context, workerClassName: String, parameters: WorkerParameters) =
-                        object : Worker(context, parameters) {
+                    override fun createWorker(appContext: Context, workerClassName: String, workerParameters: WorkerParameters) =
+                        object : Worker(appContext, workerParameters) {
                             override fun doWork() = Result.success(inputData)
                         }
                 }).build())
