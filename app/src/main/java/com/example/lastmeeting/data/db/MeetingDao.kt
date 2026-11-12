@@ -32,7 +32,15 @@ interface MeetingDao {
     @Query("UPDATE meetings SET title = :title WHERE id = :id")
     suspend fun updateTitle(id: Long, title: String)
 
-    @Query("UPDATE meetings SET transcript = :transcript WHERE id = :id AND transcriptGeneration = :generation")
+    // Invalidate dependent results in the same guarded write, including in-flight protocols.
+    // IS NOT compares NULL safely when storing the first transcript after an explicit deletion.
+    @Query("""
+        UPDATE meetings SET
+            protocol = CASE WHEN transcript IS NOT :transcript THEN NULL ELSE protocol END,
+            protocolGeneration = protocolGeneration + CASE WHEN transcript IS NOT :transcript THEN 1 ELSE 0 END,
+            transcript = :transcript
+        WHERE id = :id AND transcriptGeneration = :generation
+    """)
     suspend fun updateTranscript(id: Long, transcript: String, generation: Long): Int
 
     @Query("UPDATE meetings SET protocol = :protocol WHERE id = :id AND protocolGeneration = :generation")

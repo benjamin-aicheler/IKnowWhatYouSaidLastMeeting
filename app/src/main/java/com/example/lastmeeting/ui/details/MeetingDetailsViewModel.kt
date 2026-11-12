@@ -3,6 +3,7 @@ package com.example.lastmeeting.ui.details
 import android.app.Application
 import android.media.MediaPlayer
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -31,7 +32,8 @@ sealed class DetailsUiEvent {
 
 class MeetingDetailsViewModel(
     application: Application,
-    val meetingId: Long
+    val meetingId: Long,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle()
 ) : AndroidViewModel(application) {
 
     private val app = application as LastMeetingApp
@@ -82,6 +84,11 @@ class MeetingDetailsViewModel(
 
     private val _eventFlow = MutableSharedFlow<DetailsUiEvent>()
     val eventFlow: SharedFlow<DetailsUiEvent> = _eventFlow.asSharedFlow()
+
+    val showTranscriptionConfirmation: StateFlow<Boolean> =
+        savedStateHandle.getStateFlow("confirm_transcript_replacement", false)
+
+    private var requestingTranscription = false
 
     private var mediaPlayer: MediaPlayer? = null
     private var isAudioPaused: Boolean = false
@@ -223,9 +230,35 @@ class MeetingDetailsViewModel(
     }
 
     fun transcribe() {
+        requestTranscription(replaceExisting = false)
+    }
+
+    fun confirmTranscription() {
+        // Consume the decision before launching so a second tap cannot submit it again.
+        if (!showTranscriptionConfirmation.value) return
+        dismissTranscriptionConfirmation()
+        requestTranscription(replaceExisting = true)
+    }
+
+    fun dismissTranscriptionConfirmation() {
+        savedStateHandle["confirm_transcript_replacement"] = false
+    }
+
+    private fun requestTranscription(replaceExisting: Boolean) {
+        if (requestingTranscription || isTranscribing.value || isProtocolizing.value) return
+        requestingTranscription = true
         viewModelScope.launch {
-            val current = repository.getMeetingById(meetingId).first() ?: return@launch
-            AiProcessingWorker.enqueue(app, meetingId, AiProcessingWorker.TASK_TRANSCRIBE, current.transcriptGeneration)
+            try {
+                // Re-read storage: the screen may still display an older, empty transcript.
+                val current = repository.getMeetingById(meetingId).first() ?: return@launch
+                if (current.transcript != null && !replaceExisting) {
+                    savedStateHandle["confirm_transcript_replacement"] = true
+                    return@launch
+                }
+                AiProcessingWorker.enqueue(app, meetingId, AiProcessingWorker.TASK_TRANSCRIBE, current.transcriptGeneration)
+            } finally {
+                requestingTranscription = false
+            }
         }
     }
 

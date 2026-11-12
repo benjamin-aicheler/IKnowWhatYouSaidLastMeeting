@@ -166,6 +166,104 @@ class MeetingRepositoryAiTest {
     }
 
     @Test
+    fun replacementKeepsExistingResultsUntilSuccessThenInvalidatesProtocol() = runBlocking {
+        val requestStarted = CompletableDeferred<Unit>()
+        val releaseResponse = CountDownLatch(1)
+        val repository = configuredRepository(Interceptor { chain ->
+            requestStarted.complete(Unit)
+            check(releaseResponse.await(15, TimeUnit.SECONDS))
+            response(chain.request(), "Changed transcript")
+        })
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)!!
+        val pending = async(Dispatchers.Default) { repository.transcribeMeeting(id, 0L) }
+        try {
+            withTimeout(10_000) { requestStarted.await() }
+            assertEquals(original, dao.getMeetingByIdDirect(id))
+        } finally {
+            releaseResponse.countDown()
+        }
+
+        assertEquals(AiGenerationOutcome.Stored("Changed transcript"), pending.await().getOrThrow())
+        val current = dao.getMeetingByIdDirect(id)!!
+        assertEquals("Changed transcript", current.transcript)
+        assertNull(current.protocol)
+        assertEquals(1L, current.protocolGeneration)
+        assertEquals(original.transcriptGeneration, current.transcriptGeneration)
+    }
+
+    @Test
+    fun failedReplacementKeepsExistingTranscriptAndProtocol() = runBlocking {
+        val repository = configuredRepository(Interceptor { chain ->
+            response(chain.request(), "Unavailable").newBuilder().code(503).message("Unavailable").build()
+        })
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)
+
+        assertTrue(repository.transcribeMeeting(id, 0L).isFailure)
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    @Test
+    fun identicalReplacementPreservesProtocolAndItsGeneration() = runBlocking {
+        val repository = configuredRepository(Interceptor { chain -> response(chain.request(), "Existing transcript") })
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)
+
+        assertEquals(AiGenerationOutcome.Stored("Existing transcript"), repository.transcribeMeeting(id, 0L).getOrThrow())
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    @Test
+    fun staleTranscriptionResponseDoesNotInvalidateProtocol() = runBlocking {
+        val id = insertAiMeeting()
+        val repository = configuredRepository(Interceptor { chain ->
+            runBlocking { dao.deleteTranscript(id) }
+            response(chain.request(), "Obsolete transcript")
+        })
+
+        assertEquals(AiGenerationOutcome.Discarded, repository.transcribeMeeting(id, 0L).getOrThrow())
+        val current = dao.getMeetingByIdDirect(id)!!
+        assertNull(current.transcript)
+        assertEquals("Existing protocol", current.protocol)
+        assertEquals(0L, current.protocolGeneration)
+    }
+
+    @Test
+    fun delayedProtocolCannotRepopulateAfterTranscriptChanges() = runBlocking {
+        val requestStarted = CompletableDeferred<Unit>()
+        val releaseResponse = CountDownLatch(1)
+        val protocolCalls = AtomicInteger()
+        val repository = configuredRepository(Interceptor { chain ->
+            if (chain.request().url.encodedPath.endsWith("/audio/transcriptions")) {
+                response(chain.request(), "Changed transcript")
+            } else {
+                if (protocolCalls.incrementAndGet() == 1) {
+                    requestStarted.complete(Unit)
+                    check(releaseResponse.await(15, TimeUnit.SECONDS))
+                }
+                response(chain.request(), "Generated protocol")
+            }
+        })
+        val id = insertAiMeeting()
+        val pending = async(Dispatchers.Default) { repository.protocolizeMeeting(id, 0L) }
+        try {
+            withTimeout(10_000) { requestStarted.await() }
+            repository.transcribeMeeting(id, 0L).getOrThrow()
+        } finally {
+            releaseResponse.countDown()
+        }
+
+        assertEquals(AiGenerationOutcome.Discarded, pending.await().getOrThrow())
+        assertNull(dao.getMeetingByIdDirect(id)!!.protocol)
+        // A retry keeps the old generation and must not make another request.
+        assertEquals(AiGenerationOutcome.Discarded, repository.protocolizeMeeting(id, 0L).getOrThrow())
+        assertEquals(1, protocolCalls.get())
+        assertEquals(AiGenerationOutcome.Stored("Generated protocol"), repository.protocolizeMeeting(id, 1L).getOrThrow())
+        assertEquals("Generated protocol", dao.getMeetingByIdDirect(id)!!.protocol)
+    }
+
+    @Test
     fun deletedTranscriptStaysEmptyWhenOldResponseArrives() = runBlocking {
         delayedResponse(transcriptTask = true)
     }
@@ -337,7 +435,12 @@ class MeetingRepositoryAiTest {
 
         override suspend fun updateTranscript(id: Long, transcript: String, generation: Long): Int {
             val meeting = items.value[id]?.takeIf { it.transcriptGeneration == generation } ?: return 0
-            items.value = items.value + (id to meeting.copy(transcript = transcript))
+            val changed = meeting.transcript != transcript
+            items.value = items.value + (id to meeting.copy(
+                transcript = transcript,
+                protocol = if (changed) null else meeting.protocol,
+                protocolGeneration = meeting.protocolGeneration + if (changed) 1 else 0
+            ))
             return 1
         }
 

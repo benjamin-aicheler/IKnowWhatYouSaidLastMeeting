@@ -19,7 +19,7 @@
   - `transcript` (String, nullable)
   - `protocol` (String, nullable)
   - `createdAt` (Long)
-  - `transcriptGeneration` / `protocolGeneration` (Long, default `0`; persisted deletion versions)
+  - `transcriptGeneration` / `protocolGeneration` (Long, default `0`; persisted invalidation versions)
 
 ### Recording Lifecycle
 - The meeting row is inserted as soon as the recorder runs, not after it stops, so an interrupted recording keeps a meeting instead of leaving an audio file nothing points at.
@@ -51,6 +51,7 @@
 - **Meeting Details View**:
   - Edit title
   - Trigger audio transcription via AI
+  - Confirm before replacing an existing transcript; explain the additional API request and protocol removal if the text changes. Keep existing results until transcription succeeds. Atomically clear the protocol and advance `protocolGeneration` only when the stored transcript changes, so older protocol work cannot repopulate it.
   - Trigger protocol creation via AI (based on the text transcript; prompts the user to transcribe first if no transcript exists yet)
   - Read transcript / protocol
   - Download audio, transcript (PDF), or protocol (PDF)
