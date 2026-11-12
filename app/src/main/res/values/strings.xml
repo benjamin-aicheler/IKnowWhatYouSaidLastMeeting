@@ -63,6 +63,8 @@
     <string name="msg_export_pdf_failed">PDF export failed: %1$s</string>
     <string name="msg_exported_audio_path">Audio saved to %1$s</string>
     <string name="msg_export_audio_failed">Audio export failed: %1$s</string>
+    <string name="msg_export_write_failed">Could not finish saving the file. Please try again.</string>
+    <string name="msg_export_cleanup_failed">Could not finish saving the file. An incomplete file may remain in Downloads.</string>
     <string name="msg_storage_permission_required">Storage permission is required to save files to Downloads. Please allow access and try again.</string>
 
     <!-- Deletions -->

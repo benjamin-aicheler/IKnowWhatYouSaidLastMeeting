@@ -1,14 +1,11 @@
 package com.example.lastmeeting.util
 
-import android.content.ContentValues
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
+import com.example.lastmeeting.R
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
@@ -21,42 +18,8 @@ object PdfExporter {
         typeLabel: String,
         textContent: String
     ): Result<String> {
-        return try {
-            val fileName = buildFileName(title, typeLabel, "pdf")
-            val outputStream: OutputStream?
-            val filePathDescription: String
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/LastMeeting")
-                }
-                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: return Result.failure(Exception("Failed to create MediaStore entry."))
-                outputStream = context.contentResolver.openOutputStream(uri)
-                filePathDescription = "Downloads/LastMeeting/$fileName"
-            } else {
-                @Suppress("DEPRECATION")
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val targetDir = File(downloadsDir, "LastMeeting")
-                if (!targetDir.exists()) targetDir.mkdirs()
-                val targetFile = File(targetDir, fileName)
-                outputStream = FileOutputStream(targetFile)
-                filePathDescription = targetFile.absolutePath
-            }
-
-            if (outputStream == null) {
-                return Result.failure(Exception("Unable to open output stream for PDF."))
-            }
-
-            outputStream.use { stream ->
-                writePdfDocument(title, typeLabel, textContent, stream)
-            }
-
-            Result.success(filePathDescription)
-        } catch (e: Exception) {
-            Result.failure(e)
+        return DownloadsExporter.export(context, ExportFileNames.pdf(title, typeLabel), "application/pdf") { stream ->
+            writePdfDocument(title, typeLabel, textContent, stream)
         }
     }
 
@@ -82,7 +45,7 @@ object PdfExporter {
         typeLabel: String,
         writeDocument: (OutputStream) -> Unit
     ): File {
-        val prefix = buildFileName(title, typeLabel, "pdf").removeSuffix(".pdf") + "_"
+        val prefix = ExportFileNames.pdf(title, typeLabel).removeSuffix(".pdf") + "_"
         // Reserve a new path for every share: existing URI grants must keep their contents.
         val outFile = File.createTempFile(prefix, ".pdf", cacheDir)
         try {
@@ -100,54 +63,13 @@ object PdfExporter {
         audioFile: File
     ): Result<String> {
         if (!audioFile.exists()) {
-            return Result.failure(Exception("Audio file not found."))
+            return Result.failure(Exception(context.getString(R.string.msg_audio_not_found)))
         }
-        return try {
-            val sanitizedTitle = title.replace(Regex("[^a-zA-Z0-9_-]"), "_").ifBlank { "meeting" }
-            val fileName = "${sanitizedTitle}.m4a"
-            val outputStream: OutputStream?
-            val filePathDescription: String
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "audio/mp4")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/LastMeeting")
-                }
-                val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                    ?: return Result.failure(Exception("Failed to create MediaStore entry."))
-                outputStream = context.contentResolver.openOutputStream(uri)
-                filePathDescription = "Downloads/LastMeeting/$fileName"
-            } else {
-                @Suppress("DEPRECATION")
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val targetDir = File(downloadsDir, "LastMeeting")
-                if (!targetDir.exists()) targetDir.mkdirs()
-                val targetFile = File(targetDir, fileName)
-                outputStream = FileOutputStream(targetFile)
-                filePathDescription = targetFile.absolutePath
+        return DownloadsExporter.export(context, ExportFileNames.audio(title), "audio/mp4") { out ->
+            audioFile.inputStream().use { input ->
+                input.copyTo(out)
             }
-
-            if (outputStream == null) {
-                return Result.failure(Exception("Unable to open output stream for audio."))
-            }
-
-            outputStream.use { out ->
-                audioFile.inputStream().use { input ->
-                    input.copyTo(out)
-                }
-            }
-
-            Result.success(filePathDescription)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
-    }
-
-    private fun buildFileName(title: String, typeLabel: String, extension: String): String {
-        val sanitizedTitle = title.replace(Regex("[^a-zA-Z0-9_-]"), "_").ifBlank { "meeting" }
-        val sanitizedType = typeLabel.replace(Regex("[^a-zA-Z0-9_-]"), "_").lowercase()
-        return "${sanitizedTitle}_${sanitizedType}.$extension"
     }
 
     private fun writePdfDocument(

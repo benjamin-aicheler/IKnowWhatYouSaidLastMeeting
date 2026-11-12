@@ -51,6 +51,18 @@ class PdfExporterCacheTest {
     }
 
     @Test
+    fun unicodeAndLongTitlesRemainShareableWithUniquePaths() {
+        val title = "Müller_" + "会".repeat(200)
+        val first = PdfExporter.writeCachePdf(temporaryFolder.root, title, "Protokoll") { it.write(1) }
+        val second = PdfExporter.writeCachePdf(temporaryFolder.root, title, "Protokoll") { it.write(2) }
+        assertNotEquals(first, second)
+        assertTrue(first.name.startsWith("Müller_"))
+        assertTrue(first.name.toByteArray(Charsets.UTF_8).size < 255)
+        assertArrayEquals(byteArrayOf(1), first.readBytes())
+        assertArrayEquals(byteArrayOf(2), second.readBytes())
+    }
+
+    @Test
     fun failedWriteRemovesOnlyTheIncompleteFileAndClosesTheStream() {
         val existing = PdfExporter.writeCachePdf(temporaryFolder.root, "Team Sync", "Transcript") {
             it.write("Already shared".toByteArray())

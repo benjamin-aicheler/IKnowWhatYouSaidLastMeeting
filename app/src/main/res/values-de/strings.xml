@@ -63,6 +63,8 @@
     <string name="msg_export_pdf_failed">PDF-Export fehlgeschlagen: %1$s</string>
     <string name="msg_exported_audio_path">Audio gespeichert unter %1$s</string>
     <string name="msg_export_audio_failed">Audio-Export fehlgeschlagen: %1$s</string>
+    <string name="msg_export_write_failed">Die Datei konnte nicht vollständig gespeichert werden. Bitte versuchen Sie es erneut.</string>
+    <string name="msg_export_cleanup_failed">Die Datei konnte nicht vollständig gespeichert werden. Möglicherweise bleibt eine unvollständige Datei in Downloads zurück.</string>
     <string name="msg_storage_permission_required">Für das Speichern in Downloads ist die Speicherberechtigung erforderlich. Bitte erlauben Sie den Zugriff und versuchen Sie es erneut.</string>
 
     <!-- Deletions -->
