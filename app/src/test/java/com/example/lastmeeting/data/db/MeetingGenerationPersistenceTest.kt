@@ -33,13 +33,14 @@ class MeetingGenerationPersistenceTest {
             val dao = database.meetingDao()
             assertEquals(0, dao.updateTranscript(id, "Stale transcript", 0L))
             assertNull(dao.getMeetingByIdDirect(id)!!.transcript)
-            // The other field's version is independent.
+            // Deleting a transcript alone leaves the protocol version independent.
             assertEquals(1, dao.updateProtocol(id, "Current protocol", 0L))
             assertEquals(1, dao.updateTranscript(id, "New transcript", 1L))
-            assertEquals(0L, dao.deleteProtocol(id))
-            assertEquals(0, dao.updateProtocol(id, "Stale protocol", 0L))
+            // Successfully storing changed source text has already advanced the protocol version.
+            assertEquals(1L, dao.deleteProtocol(id))
+            assertEquals(0, dao.updateProtocol(id, "Stale protocol", 1L))
             assertNull(dao.getMeetingByIdDirect(id)!!.protocol)
-            assertEquals(1, dao.updateProtocol(id, "New protocol", 1L))
+            assertEquals(1, dao.updateProtocol(id, "New protocol", 2L))
             assertEquals("New transcript", dao.getMeetingByIdDirect(id)!!.transcript)
             assertEquals("New protocol", dao.getMeetingByIdDirect(id)!!.protocol)
         }
@@ -77,9 +78,64 @@ class MeetingGenerationPersistenceTest {
                 assertEquals(0, dao.updateTranscript(original.id, "Old transcript", 0L))
                 assertEquals(0, dao.updateProtocol(original.id, "Old protocol", 0L))
                 assertEquals(1, dao.updateTranscript(original.id, "New transcript", 1L))
-                assertEquals(1, dao.updateProtocol(original.id, "New protocol", 1L))
+                assertEquals(1, dao.updateProtocol(original.id, "New protocol", 2L))
                 assertEquals(original.audioFilePath, dao.getMeetingByIdDirect(original.id)!!.audioFilePath)
             }
+        }
+    }
+
+    @Test
+    fun changedTranscriptAtomicallyInvalidatesSavedAndPendingProtocolsAcrossReopen() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val name = "transcript-replacement.db"
+        val id = open(context, name).useDatabase { database ->
+            val dao = database.meetingDao()
+            val id = dao.insertMeeting(meeting())
+            assertEquals(1, dao.updateTranscript(id, "Changed transcript", 0L))
+            val current = dao.getMeetingByIdDirect(id)!!
+            assertEquals("Changed transcript", current.transcript)
+            assertNull(current.protocol)
+            assertEquals(1L, current.protocolGeneration)
+            assertEquals(0L, current.transcriptGeneration)
+            id
+        }
+
+        open(context, name).useDatabase { database ->
+            val dao = database.meetingDao()
+            assertEquals(0, dao.updateProtocol(id, "Delayed protocol", 0L))
+            assertNull(dao.getMeetingByIdDirect(id)!!.protocol)
+            assertEquals(1, dao.updateProtocol(id, "Current protocol", 1L))
+        }
+    }
+
+    @Test
+    fun identicalAndStaleTranscriptWritesPreserveProtocolAndVersions() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        open(context, "unchanged-transcript.db").useDatabase { database ->
+            val dao = database.meetingDao()
+            val original = meeting()
+            val id = dao.insertMeeting(original)
+            assertEquals(1, dao.updateTranscript(id, original.transcript!!, 0L))
+            assertEquals(original.copy(id = id), dao.getMeetingByIdDirect(id))
+            assertEquals(0, dao.updateTranscript(id, "Stale transcript", 1L))
+            assertEquals(original.copy(id = id), dao.getMeetingByIdDirect(id))
+            assertEquals(0, dao.updateTranscript(id + 1, "Missing meeting", 0L))
+        }
+    }
+
+    @Test
+    fun storingTranscriptAfterDeletionInvalidatesRemainingProtocol() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        open(context, "deleted-transcript.db").useDatabase { database ->
+            val dao = database.meetingDao()
+            val id = dao.insertMeeting(meeting())
+            dao.deleteTranscript(id)
+            assertEquals(0, dao.updateTranscript(id, "Stale transcript", 0L))
+            assertEquals("Saved protocol", dao.getMeetingByIdDirect(id)!!.protocol)
+            assertEquals(1, dao.updateTranscript(id, "New transcript", 1L))
+            assertNull(dao.getMeetingByIdDirect(id)!!.protocol)
+            assertEquals(0, dao.updateProtocol(id, "Stale protocol", 0L))
+            assertEquals(1, dao.updateProtocol(id, "New protocol", 1L))
         }
     }
 

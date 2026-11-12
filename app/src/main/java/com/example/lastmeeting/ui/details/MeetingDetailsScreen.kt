@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,6 +43,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +78,7 @@ fun MeetingDetailsScreen(
     val isTranscribing by viewModel.isTranscribing.collectAsState()
     val isProtocolizing by viewModel.isProtocolizing.collectAsState()
     val isPlayingAudio by viewModel.isPlayingAudio.collectAsState()
+    val showTranscriptionConfirmation by viewModel.showTranscriptionConfirmation.collectAsState()
 
     var showDeleteMeetingDialog by remember { mutableStateOf(false) }
     var showDeleteTranscriptDialog by remember { mutableStateOf(false) }
@@ -467,6 +470,27 @@ fun MeetingDetailsScreen(
     }
 
     // Confirmation Dialogs
+    if (showTranscriptionConfirmation) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissTranscriptionConfirmation,
+            title = { Text(stringResource(R.string.confirm_replace_transcript_title)) },
+            text = { Text(stringResource(R.string.confirm_replace_transcript)) },
+            confirmButton = {
+                TextButton(
+                    onClick = viewModel::confirmTranscription,
+                    enabled = !isTranscribing && !isProtocolizing
+                ) {
+                    Text(stringResource(R.string.action_replace_transcript))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissTranscriptionConfirmation) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
     if (showDeleteMeetingDialog) {
         DeleteConfirmationDialog(
             message = stringResource(R.string.confirm_delete_meeting),

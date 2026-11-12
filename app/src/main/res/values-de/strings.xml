@@ -33,6 +33,9 @@
     <string name="label_date">Datum</string>
     <string name="label_duration">Dauer</string>
     <string name="action_transcribe">Transkribieren</string>
+    <string name="confirm_replace_transcript_title">Transkript ersetzen?</string>
+    <string name="confirm_replace_transcript">Eine erneute Transkription sendet eine weitere API-Anfrage und kann Kosten verursachen. Das vorhandene Transkript wird erst nach erfolgreicher Transkription ersetzt. Ändert sich der Text, wird das vorhandene Protokoll entfernt und muss neu erstellt werden.</string>
+    <string name="action_replace_transcript">Erneut transkribieren</string>
     <string name="action_protocolize">Protokollieren</string>
     <string name="label_transcript">Transkript</string>
     <string name="label_protocol">Protokoll</string>

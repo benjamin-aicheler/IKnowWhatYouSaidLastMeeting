@@ -247,7 +247,12 @@ class MeetingRecordingRecoveryRaceTest {
         override suspend fun updateTranscript(id: Long, transcript: String, generation: Long): Int =
             synchronized(lock) {
                 val meeting = items.value[id]?.takeIf { it.transcriptGeneration == generation } ?: return@synchronized 0
-                items.value = items.value + (id to meeting.copy(transcript = transcript))
+                val changed = meeting.transcript != transcript
+                items.value = items.value + (id to meeting.copy(
+                    transcript = transcript,
+                    protocol = if (changed) null else meeting.protocol,
+                    protocolGeneration = meeting.protocolGeneration + if (changed) 1 else 0
+                ))
                 1
             }
 

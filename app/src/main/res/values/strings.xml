@@ -33,6 +33,9 @@
     <string name="label_date">Date</string>
     <string name="label_duration">Duration</string>
     <string name="action_transcribe">Transcribe</string>
+    <string name="confirm_replace_transcript_title">Replace transcript?</string>
+    <string name="confirm_replace_transcript">Transcribing again sends another API request and may incur charges. Your existing transcript will be replaced only after success. If the text changes, the existing protocol will be removed and must be generated again.</string>
+    <string name="action_replace_transcript">Transcribe again</string>
     <string name="action_protocolize">Protocolize</string>
     <string name="label_transcript">Transcript</string>
     <string name="label_protocol">Protocol</string>
