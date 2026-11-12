@@ -63,6 +63,7 @@
 
 ### Export & Sharing
 - **PDF Export**: Generated dynamically using Android `android.graphics.pdf.PdfDocument` and saved to `Downloads/LastMeeting/`. API 29+ writes through MediaStore; API 26-28 writes to the public Downloads folder directly and therefore needs `WRITE_EXTERNAL_STORAGE` (`android:maxSdkVersion="28"`), requested by the export action in `MeetingDetailsScreen` before the exporter runs.
+- **Export integrity**: PDF and audio use the same Downloads writer. API 29+ inserts with `IS_PENDING=1`, publishes only after the stream closes successfully, and attempts to delete its own entry on handled failure. API 26-28 atomically reserves a unique filename and removes only that incomplete export on failure. Names preserve Unicode letters, numbers, and combining marks with NFC normalization and bounded UTF-8 length. Shared cache PDFs remain unique and retain earlier contents.
 - **Sharing**: Android Sharesheet (`Intent.ACTION_SEND` with `FileProvider`) for audio file, transcript, or protocol.
 
 ### Background Services & Screen Retention
