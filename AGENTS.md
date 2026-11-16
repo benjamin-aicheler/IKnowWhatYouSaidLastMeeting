@@ -36,6 +36,7 @@
 - **Transcription**:
   - **OpenAI (`api.openai.com`)**: Uses `POST /v1/audio/transcriptions` (`multipart/form-data`) sending the `.m4a` recording directly with `model = transcriptionModel` and `prompt = transcriptionSystemPrompt`.
   - **Custom Multimodal Endpoints**: Uses `POST /v1/chat/completions` with audio encoded as base64 in `input_audio` content payload (`type: "input_audio", input_audio: { data: "<base64>", format: "m4a" }`).
+  - **Large Recordings (> 25 MB)**: Recordings exceeding the 25 MB upload limit are automatically split into temporary M4A segments at sample boundaries using `MediaExtractor`/`MediaMuxer` (outside `filesDir/recordings`), transcribed sequentially, and merged in order; `OpenAiApiClient` also enforces the 25 MB per-upload guard as a non-retryable failure.
 - **Protocol Generation**:
   - Uses `POST /v1/chat/completions` with `model = protocolModel`, sending **text only** (`protocolSystemPrompt` and the meeting's existing `transcript` text). Protocol generation requires a transcript to exist first and never re-uploads the audio file.
 - **Configuration (DataStore Preferences)**:

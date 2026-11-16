@@ -6,6 +6,9 @@ import com.example.lastmeeting.data.api.OpenAiApiClient
 import com.example.lastmeeting.data.db.MeetingDao
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.data.preferences.SettingsRepository
+import com.example.lastmeeting.util.AndroidAudioSegmenter
+import com.example.lastmeeting.util.AudioSegmentationSession
+import com.example.lastmeeting.util.AudioSegmenter
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -371,7 +374,94 @@ class MeetingRepositoryAiTest {
         }
     }
 
-    private suspend fun configuredRepository(interceptor: Interceptor): MeetingRepository {
+    @Test
+    fun multiSegmentRecordingUploadsSequentiallyMergesAndCleansUp() = runBlocking {
+        val seg1 = File.createTempFile("seg-1-", ".m4a", app.cacheDir).apply { writeText("part1") }
+        val seg2 = File.createTempFile("seg-2-", ".m4a", app.cacheDir).apply { writeText("part2") }
+        var cleanedUp = false
+        val segmenter = AudioSegmenter { _, _ ->
+            Result.success(AudioSegmentationSession(listOf(seg1, seg2)) { cleanedUp = true })
+        }
+        val calls = AtomicInteger()
+        val repository = configuredRepository(
+            interceptor = Interceptor { chain ->
+                val n = calls.incrementAndGet()
+                response(chain.request(), "Segment $n text")
+            },
+            audioSegmenter = segmenter
+        )
+        val id = insertAiMeeting()
+
+        val outcome = repository.transcribeMeeting(id, 0L).getOrThrow()
+
+        assertEquals(AiGenerationOutcome.Stored("Segment 1 text\n\nSegment 2 text"), outcome)
+        assertEquals(2, calls.get())
+        assertTrue(cleanedUp)
+        val updated = dao.getMeetingByIdDirect(id)!!
+        assertEquals("Segment 1 text\n\nSegment 2 text", updated.transcript)
+        assertNull(updated.protocol)
+    }
+
+    @Test
+    fun failedSecondSegmentPreservesExistingResultsAndCleansUp() = runBlocking {
+        val seg1 = File.createTempFile("seg-fail-1-", ".m4a", app.cacheDir).apply { writeText("part1") }
+        val seg2 = File.createTempFile("seg-fail-2-", ".m4a", app.cacheDir).apply { writeText("part2") }
+        var cleanedUp = false
+        val segmenter = AudioSegmenter { _, _ ->
+            Result.success(AudioSegmentationSession(listOf(seg1, seg2)) { cleanedUp = true })
+        }
+        val calls = AtomicInteger()
+        val repository = configuredRepository(
+            interceptor = Interceptor { chain ->
+                if (calls.incrementAndGet() == 1) {
+                    response(chain.request(), "Segment 1 text")
+                } else {
+                    response(chain.request(), "Unavailable").newBuilder().code(503).message("Unavailable").build()
+                }
+            },
+            audioSegmenter = segmenter
+        )
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)
+
+        val result = repository.transcribeMeeting(id, 0L)
+
+        assertTrue(result.isFailure)
+        assertTrue(cleanedUp)
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    @Test
+    fun deletingTranscriptMidSegmentationSkipsRemainingSegmentsAndDiscards() = runBlocking {
+        val seg1 = File.createTempFile("seg-del-1-", ".m4a", app.cacheDir).apply { writeText("part1") }
+        val seg2 = File.createTempFile("seg-del-2-", ".m4a", app.cacheDir).apply { writeText("part2") }
+        var cleanedUp = false
+        val segmenter = AudioSegmenter { _, _ ->
+            Result.success(AudioSegmentationSession(listOf(seg1, seg2)) { cleanedUp = true })
+        }
+        val id = insertAiMeeting()
+        val calls = AtomicInteger()
+        val repository = configuredRepository(
+            interceptor = Interceptor { chain ->
+                calls.incrementAndGet()
+                runBlocking { dao.deleteTranscript(id) }
+                response(chain.request(), "Segment 1 text")
+            },
+            audioSegmenter = segmenter
+        )
+
+        val outcome = repository.transcribeMeeting(id, 0L).getOrThrow()
+
+        assertEquals(AiGenerationOutcome.Discarded, outcome)
+        assertEquals(1, calls.get())
+        assertTrue(cleanedUp)
+        assertNull(dao.getMeetingByIdDirect(id)!!.transcript)
+    }
+
+    private suspend fun configuredRepository(
+        interceptor: Interceptor,
+        audioSegmenter: AudioSegmenter = AndroidAudioSegmenter { File(app.cacheDir, "audio_segments") }
+    ): MeetingRepository {
         settingsRepository.saveSettings(
             baseUrl = SettingsRepository.DEFAULT_BASE_URL,
             apiKey = "test-key",
@@ -379,8 +469,13 @@ class MeetingRepositoryAiTest {
             protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
             transcriptionPrompt = "Transcribe", protocolPrompt = "Summarize"
         )
-        return MeetingRepository(app, dao, settingsRepository,
-            apiClient = OpenAiApiClient(httpClient = OkHttpClient.Builder().addInterceptor(interceptor).build()))
+        return MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = settingsRepository,
+            apiClient = OpenAiApiClient(httpClient = OkHttpClient.Builder().addInterceptor(interceptor).build()),
+            audioSegmenter = audioSegmenter
+        )
     }
 
     private suspend fun insertAiMeeting(): Long {

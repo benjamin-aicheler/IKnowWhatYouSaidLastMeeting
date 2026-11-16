@@ -71,12 +71,22 @@ internal data class ApiErrorDetail(
  */
 internal class ApiHttpException(val code: Int, message: String) : IOException(message)
 
+internal class AudioFileTooLargeException(
+    val fileSizeBytes: Long,
+    val maxBytes: Long,
+    message: String
+) : IllegalArgumentException(message)
+
 class OpenAiApiClient(
     connectTimeoutSeconds: Long = 60,
     readTimeoutSeconds: Long = 300,
     writeTimeoutSeconds: Long = 120,
     internal val httpClient: OkHttpClient? = null
 ) {
+
+    companion object {
+        const val MAX_AUDIO_UPLOAD_BYTES: Long = 25L * 1024L * 1024L
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -103,6 +113,16 @@ class OpenAiApiClient(
 
             if (!audioFile.exists() || audioFile.length() == 0L) {
                 return@withContext Result.failure(IllegalArgumentException("Audio file does not exist or is empty."))
+            }
+
+            if (audioFile.length() > MAX_AUDIO_UPLOAD_BYTES) {
+                return@withContext Result.failure(
+                    AudioFileTooLargeException(
+                        fileSizeBytes = audioFile.length(),
+                        maxBytes = MAX_AUDIO_UPLOAD_BYTES,
+                        message = "Audio file (${audioFile.length()} bytes) exceeds the 25 MB upload limit ($MAX_AUDIO_UPLOAD_BYTES bytes)."
+                    )
+                )
             }
 
             val resolvedModel = SettingsRepository.resolveModel(
