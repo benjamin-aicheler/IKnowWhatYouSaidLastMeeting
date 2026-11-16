@@ -285,7 +285,8 @@ class MeetingRepository(
                     apiKey = settings.apiKey,
                     model = settings.transcriptionModel,
                     prompt = settings.transcriptionPrompt,
-                    audioFile = segment
+                    audioFile = segment,
+                    transcriptionMode = settings.transcriptionMode
                 )
                 val segmentText = segmentResult.getOrElse { error ->
                     if (error is AudioFileTooLargeException) {

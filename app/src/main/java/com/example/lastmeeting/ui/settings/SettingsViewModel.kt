@@ -7,6 +7,7 @@ import com.example.lastmeeting.LastMeetingApp
 import com.example.lastmeeting.R
 import com.example.lastmeeting.data.preferences.ApiSettings
 import com.example.lastmeeting.data.preferences.SettingsRepository
+import com.example.lastmeeting.data.preferences.TranscriptionMode
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,6 +27,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         initialValue = ApiSettings(
             baseUrl = SettingsRepository.DEFAULT_BASE_URL,
             apiKey = "",
+            transcriptionMode = TranscriptionMode.AUTO,
             transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
             protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
             transcriptionPrompt = "",
@@ -39,6 +41,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun saveSettings(
         baseUrl: String,
         apiKey: String,
+        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO,
         transcriptionModel: String,
         protocolModel: String,
         transcriptionPrompt: String,
@@ -48,6 +51,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             repository.saveSettings(
                 baseUrl = baseUrl,
                 apiKey = apiKey,
+                transcriptionMode = transcriptionMode,
                 transcriptionModel = transcriptionModel,
                 protocolModel = protocolModel,
                 transcriptionPrompt = transcriptionPrompt,

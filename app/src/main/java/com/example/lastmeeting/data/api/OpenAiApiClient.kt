@@ -1,6 +1,7 @@
 package com.example.lastmeeting.data.api
 
 import com.example.lastmeeting.data.preferences.SettingsRepository
+import com.example.lastmeeting.data.preferences.TranscriptionMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -104,7 +105,8 @@ class OpenAiApiClient(
         apiKey: String,
         model: String,
         prompt: String,
-        audioFile: File
+        audioFile: File,
+        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             if (apiKey.isBlank()) {
@@ -131,7 +133,7 @@ class OpenAiApiClient(
             )
             val normalizedBaseUrl = formatBaseUrl(baseUrl)
 
-            if (isOpenAiHost(normalizedBaseUrl)) {
+            if (shouldUseMultipartTranscription(normalizedBaseUrl, transcriptionMode)) {
                 val body = createMultipartTranscriptionRequestBody(
                     model = resolvedModel,
                     prompt = prompt,
@@ -169,13 +171,15 @@ class OpenAiApiClient(
         apiKey: String,
         model: String,
         prompt: String,
-        audioFile: File
+        audioFile: File,
+        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO
     ): Result<String> = transcribeAudio(
         baseUrl = baseUrl,
         apiKey = apiKey,
         model = model,
         prompt = prompt,
-        audioFile = audioFile
+        audioFile = audioFile,
+        transcriptionMode = transcriptionMode
     )
 
     suspend fun generateFromText(
@@ -274,6 +278,15 @@ class OpenAiApiClient(
         baseUrl.trim().ifBlank { SettingsRepository.DEFAULT_BASE_URL }.let {
             if (it.endsWith("/")) it else "$it/"
         }
+
+    internal fun shouldUseMultipartTranscription(
+        baseUrl: String,
+        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO
+    ): Boolean = when (transcriptionMode) {
+        TranscriptionMode.AUTO -> isOpenAiHost(baseUrl)
+        TranscriptionMode.AUDIO_TRANSCRIPTIONS -> true
+        TranscriptionMode.CHAT_COMPLETIONS -> false
+    }
 
     internal fun isOpenAiHost(baseUrl: String): Boolean {
         val host = formatBaseUrl(baseUrl).toHttpUrlOrNull()?.host?.lowercase() ?: return false

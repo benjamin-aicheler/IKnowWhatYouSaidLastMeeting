@@ -34,14 +34,15 @@
 
 ### AI Integration
 - **Transcription**:
-  - **OpenAI (`api.openai.com`)**: Uses `POST /v1/audio/transcriptions` (`multipart/form-data`) sending the `.m4a` recording directly with `model = transcriptionModel` and `prompt = transcriptionSystemPrompt`.
-  - **Custom Multimodal Endpoints**: Uses `POST /v1/chat/completions` with audio encoded as base64 in `input_audio` content payload (`type: "input_audio", input_audio: { data: "<base64>", format: "m4a" }`).
+  - **Automatic (`TranscriptionMode.AUTO`, default)**: Uses `POST /v1/audio/transcriptions` (`multipart/form-data`) for OpenAI hosts (`api.openai.com`) and `POST /v1/chat/completions` (`input_audio` base64 `m4a`) for other hosts.
+  - **Explicit Override (`TranscriptionMode.AUDIO_TRANSCRIPTIONS` / `CHAT_COMPLETIONS`)**: Users can override the routing mode in Settings to force multipart `/audio/transcriptions` (e.g., Groq, LiteLLM, faster-whisper) or multimodal `chat/completions` regardless of hostname.
   - **Large Recordings (> 25 MB)**: Recordings exceeding the 25 MB upload limit are automatically split into temporary M4A segments at sample boundaries using `MediaExtractor`/`MediaMuxer` (outside `filesDir/recordings`), transcribed sequentially, and merged in order; `OpenAiApiClient` also enforces the 25 MB per-upload guard as a non-retryable failure.
 - **Protocol Generation**:
   - Uses `POST /v1/chat/completions` with `model = protocolModel`, sending **text only** (`protocolSystemPrompt` and the meeting's existing `transcript` text). Protocol generation requires a transcript to exist first and never re-uploads the audio file.
 - **Configuration (DataStore Preferences)**:
   - `baseUrl` (default: `https://api.openai.com/v1/`)
   - `apiKey`
+  - `transcriptionMode` (`AUTO` default, `AUDIO_TRANSCRIPTIONS`, `CHAT_COMPLETIONS`)
   - `transcriptionModel` (default: `gpt-4o-mini-transcribe`)
   - `protocolModel` (default: `gpt-4o-mini`)
   - `transcriptionSystemPrompt` (default provided, customizable by user)
@@ -60,7 +61,7 @@
   - Delete transcript individually (with confirmation dialog)
   - Delete protocol individually (with confirmation dialog)
   - Delete audio (deletes the entire meeting record and associated files, with confirmation dialog)
-- **Settings View**: Configure API Base URL, API Key, Transcription Model Name, Protocol Model Name, and System Prompts.
+- **Settings View**: Configure API Base URL, API Key, Transcription Endpoint Mode, Transcription Model Name, Protocol Model Name, and System Prompts.
 
 ### Export & Sharing
 - **PDF Export**: Generated dynamically using Android `android.graphics.pdf.PdfDocument` and saved to `Downloads/LastMeeting/`. API 29+ writes through MediaStore; API 26-28 writes to the public Downloads folder directly and therefore needs `WRITE_EXTERNAL_STORAGE` (`android:maxSdkVersion="28"`), requested by the export action in `MeetingDetailsScreen` before the exporter runs.

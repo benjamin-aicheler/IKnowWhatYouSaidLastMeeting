@@ -3,6 +3,7 @@ package com.example.lastmeeting
 import com.example.lastmeeting.data.api.AudioFileTooLargeException
 import com.example.lastmeeting.data.api.OpenAiApiClient
 import com.example.lastmeeting.data.preferences.SettingsRepository
+import com.example.lastmeeting.data.preferences.TranscriptionMode
 import com.example.lastmeeting.service.AndroidAudioRecorder
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -342,5 +343,99 @@ class OpenAiApiClientTest {
         } finally {
             tempFile.delete()
         }
+    }
+
+    @Test
+    fun testExplicitAudioTranscriptionsModeRoutesCustomHostToMultipartEndpoint() = runBlocking {
+        var capturedRequest: Request? = null
+        val httpClient = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                capturedRequest = chain.request()
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body("""{"text":"Groq Whisper transcript"}""".toResponseBody("application/json".toMediaType()))
+                    .build()
+            })
+            .build()
+
+        val client = OpenAiApiClient(httpClient = httpClient)
+        val tempFile = File.createTempFile("meeting_groq", ".m4a")
+        tempFile.writeBytes(byteArrayOf(1, 2, 3, 4))
+
+        try {
+            val result = client.transcribeAudio(
+                baseUrl = "https://api.groq.com/openai/v1",
+                apiKey = "gsk-test",
+                model = "whisper-large-v3-turbo",
+                prompt = "Meeting hints",
+                audioFile = tempFile,
+                transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS
+            )
+
+            val request = checkNotNull(capturedRequest)
+            assertTrue(result.isSuccess)
+            assertEquals("Groq Whisper transcript", result.getOrNull())
+            assertEquals("https://api.groq.com/openai/v1/audio/transcriptions", request.url.toString())
+            assertTrue(request.body is MultipartBody)
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @Test
+    fun testExplicitChatCompletionsModeRoutesOpenAiHostToChatAudioEndpoint() = runBlocking {
+        var capturedRequest: Request? = null
+        val httpClient = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                capturedRequest = chain.request()
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(
+                        """{"choices":[{"message":{"content":"Chat audio transcript"}}]}"""
+                            .toResponseBody("application/json".toMediaType())
+                    )
+                    .build()
+            })
+            .build()
+
+        val client = OpenAiApiClient(httpClient = httpClient)
+        val tempFile = File.createTempFile("meeting_chat_override", ".m4a")
+        tempFile.writeBytes(byteArrayOf(5, 6, 7, 8))
+
+        try {
+            val result = client.transcribeAudio(
+                baseUrl = "https://api.openai.com/v1/",
+                apiKey = "sk-test",
+                model = "gpt-4o-audio-preview",
+                prompt = "Transcribe",
+                audioFile = tempFile,
+                transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS
+            )
+
+            val request = checkNotNull(capturedRequest)
+            assertTrue(result.isSuccess)
+            assertEquals("Chat audio transcript", result.getOrNull())
+            assertEquals("https://api.openai.com/v1/chat/completions", request.url.toString())
+            val buffer = Buffer()
+            request.body!!.writeTo(buffer)
+            assertTrue(buffer.readUtf8().contains("input_audio"))
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @Test
+    fun testTranscriptionModeFromStorageDefaultsToAuto() {
+        assertEquals(TranscriptionMode.AUTO, TranscriptionMode.fromStorage(null))
+        assertEquals(TranscriptionMode.AUTO, TranscriptionMode.fromStorage("   "))
+        assertEquals(TranscriptionMode.AUTO, TranscriptionMode.fromStorage("unknown_mode"))
+        assertEquals(TranscriptionMode.AUDIO_TRANSCRIPTIONS, TranscriptionMode.fromStorage("audio_transcriptions"))
+        assertEquals(TranscriptionMode.CHAT_COMPLETIONS, TranscriptionMode.fromStorage("CHAT_COMPLETIONS"))
     }
 }
