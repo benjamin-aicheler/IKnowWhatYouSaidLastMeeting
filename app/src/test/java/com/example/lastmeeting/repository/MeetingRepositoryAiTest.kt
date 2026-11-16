@@ -557,8 +557,8 @@ class MeetingRepositoryAiTest {
             }
         }
 
-        override suspend fun finishMeeting(id: Long, endTime: Long) {
-            items.value[id]?.let { items.value = items.value + (id to it.copy(endTime = endTime)) }
+        override suspend fun finishMeeting(id: Long, endTime: Long, isDamaged: Boolean) {
+            items.value[id]?.let { items.value = items.value + (id to it.copy(endTime = endTime, isDamaged = isDamaged)) }
         }
 
         override suspend fun deleteMeeting(id: Long) {

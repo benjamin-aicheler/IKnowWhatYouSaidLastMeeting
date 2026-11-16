@@ -85,7 +85,12 @@ class MeetingRepository(
         activeReconciliations.forEach { it.add(path) }
     }
 
-    suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long {
+    suspend fun createMeeting(
+        audioFile: File,
+        startTime: Long,
+        endTime: Long,
+        isDamaged: Boolean = false
+    ): Long {
         val path = audioFile.absolutePath
         synchronized(recordingLock) {
             activeReconciliations.forEach { it.add(path) }
@@ -99,7 +104,8 @@ class MeetingRepository(
                     audioFilePath = path,
                     transcript = null,
                     protocol = null,
-                    createdAt = System.currentTimeMillis()
+                    createdAt = System.currentTimeMillis(),
+                    isDamaged = isDamaged
                 )
             )
         } finally {
@@ -146,9 +152,9 @@ class MeetingRepository(
         return id
     }
 
-    suspend fun finishMeeting(id: Long, endTime: Long) {
+    suspend fun finishMeeting(id: Long, endTime: Long, isDamaged: Boolean = false) {
         try {
-            meetingDao.finishMeeting(id, endTime)
+            meetingDao.finishMeeting(id, endTime, isDamaged)
         } finally {
             synchronized(recordingLock) {
                 activeRecordingIdsToPaths.remove(id)?.let { path ->

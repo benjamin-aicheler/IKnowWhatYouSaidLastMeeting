@@ -277,6 +277,14 @@ fun MeetingDetailsScreen(
                                 Text(stringResource(R.string.action_share_audio))
                             }
                         }
+                        if (currentMeeting.isDamaged) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.warning_recording_damaged_details),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
 

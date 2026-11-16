@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -189,7 +190,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             bindRecordingService()
             ContextCompat.startForegroundService(context, intent)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("MainViewModel", "Failed to start recording service", e)
             _recordingError.value = if (e is SecurityException) {
                 R.string.msg_recording_permission_required
             } else {

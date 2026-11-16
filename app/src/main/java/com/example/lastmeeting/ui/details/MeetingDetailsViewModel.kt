@@ -2,6 +2,7 @@ package com.example.lastmeeting.ui.details
 
 import android.app.Application
 import android.media.MediaPlayer
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -193,7 +194,7 @@ class MeetingDetailsViewModel(
             isAudioPaused = false
             _isPlayingAudio.value = true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("MeetingDetailsVM", "Audio playback error", e)
             stopAudioPlayer()
             viewModelScope.launch {
                 _eventFlow.emit(
@@ -210,7 +211,7 @@ class MeetingDetailsViewModel(
             mediaPlayer?.pause()
             isAudioPaused = true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("MeetingDetailsVM", "Audio pause error", e)
         }
         _isPlayingAudio.value = false
     }

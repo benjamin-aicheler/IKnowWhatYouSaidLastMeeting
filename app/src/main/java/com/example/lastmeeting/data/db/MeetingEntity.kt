@@ -19,5 +19,7 @@ data class MeetingEntity(
     @ColumnInfo(defaultValue = "0")
     val transcriptGeneration: Long = 0,
     @ColumnInfo(defaultValue = "0")
-    val protocolGeneration: Long = 0
+    val protocolGeneration: Long = 0,
+    @ColumnInfo(defaultValue = "0")
+    val isDamaged: Boolean = false
 )

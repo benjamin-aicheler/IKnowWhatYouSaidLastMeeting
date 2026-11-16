@@ -329,6 +329,14 @@ fun MeetingItemCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            if (meeting.isDamaged) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.warning_recording_damaged),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }
