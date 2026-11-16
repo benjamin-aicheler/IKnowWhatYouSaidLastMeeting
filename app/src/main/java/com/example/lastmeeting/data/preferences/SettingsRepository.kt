@@ -3,6 +3,7 @@ package com.example.lastmeeting.data.preferences
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -31,6 +32,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_PROTOCOL_MODEL = stringPreferencesKey("api_protocol_model")
         val KEY_TRANSCRIPTION_PROMPT = stringPreferencesKey("transcription_prompt")
         val KEY_PROTOCOL_PROMPT = stringPreferencesKey("protocol_prompt")
+        val KEY_CONSENT_NOTICE_ACKNOWLEDGED = booleanPreferencesKey("consent_notice_acknowledged")
 
         const val DEFAULT_BASE_URL = "https://api.openai.com/v1/"
         const val DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
@@ -93,6 +95,16 @@ class SettingsRepository(private val context: Context) {
             preferences.remove(KEY_MODEL)
             preferences[KEY_TRANSCRIPTION_PROMPT] = transcriptionPrompt.trim()
             preferences[KEY_PROTOCOL_PROMPT] = protocolPrompt.trim()
+        }
+    }
+
+    val consentNoticeAcknowledgedFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_CONSENT_NOTICE_ACKNOWLEDGED] ?: false
+    }
+
+    suspend fun acknowledgeConsentNotice() {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_CONSENT_NOTICE_ACKNOWLEDGED] = true
         }
     }
 }

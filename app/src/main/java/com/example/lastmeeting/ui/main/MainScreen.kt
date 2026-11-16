@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +45,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -85,6 +87,7 @@ fun MainScreen(
     val context = LocalContext.current
     val resources = LocalResources.current
     val meetings by viewModel.meetings.collectAsState()
+    val showConsentNotice by viewModel.showConsentNotice.collectAsState()
     val viewMode by viewModel.viewMode.collectAsState()
     val isRecording by viewModel.isRecording.collectAsState()
     val isStopping by viewModel.isStopping.collectAsState()
@@ -235,6 +238,19 @@ fun MainScreen(
                 )
             }
         }
+    }
+
+    if (showConsentNotice) {
+        AlertDialog(
+            onDismissRequest = { viewModel.acknowledgeConsentNotice() },
+            title = { Text(text = stringResource(R.string.consent_notice_title)) },
+            text = { Text(text = stringResource(R.string.consent_notice_message)) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.acknowledgeConsentNotice() }) {
+                    Text(text = stringResource(R.string.consent_notice_acknowledge))
+                }
+            }
+        )
     }
 }
 

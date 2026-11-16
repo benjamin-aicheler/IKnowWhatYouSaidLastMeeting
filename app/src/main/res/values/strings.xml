@@ -106,4 +106,9 @@
     <!-- Default Prompts -->
     <string name="default_transcription_prompt">You are a precise audio transcription assistant. Listen to the provided meeting audio and write an accurate verbatim transcript. Output only the transcript text.</string>
     <string name="default_protocol_prompt">You are an executive meeting assistant. Read the provided meeting transcript and create a clear, structured meeting protocol. Include: 1. Executive Summary, 2. Key Discussion Topics, 3. Key Decisions Made, and 4. Action Items &amp; Next Steps.</string>
+
+    <!-- Privacy & Consent Notice -->
+    <string name="consent_notice_title">Privacy &amp; Recording Consent</string>
+    <string name="consent_notice_message">Recordings, transcripts, and protocols are stored locally on your device. When you start AI transcription or protocol generation, the audio recording or transcript is sent to the API endpoint configured in Settings.\n\nAlways inform all participants and obtain their consent before recording a meeting. Legal requirements vary by country.</string>
+    <string name="consent_notice_acknowledge">Got it</string>
 </resources>
