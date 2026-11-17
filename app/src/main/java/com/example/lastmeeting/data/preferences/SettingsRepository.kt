@@ -65,6 +65,16 @@ class SettingsRepository(private val context: Context) {
                 candidate
             }
         }
+
+        internal fun normalizePromptOverride(input: String, defaultPrompt: String): String? {
+            val trimmedInput = input.trim()
+            val trimmedDefault = defaultPrompt.trim()
+            return if (trimmedInput.isEmpty() || trimmedInput == trimmedDefault) {
+                null
+            } else {
+                trimmedInput
+            }
+        }
     }
 
     val settingsFlow: Flow<ApiSettings> = context.dataStore.data.map { preferences ->
@@ -102,6 +112,11 @@ class SettingsRepository(private val context: Context) {
         transcriptionPrompt: String,
         protocolPrompt: String
     ) {
+        val defaultTranscriptionPrompt = context.getString(R.string.default_transcription_prompt)
+        val defaultProtocolPrompt = context.getString(R.string.default_protocol_prompt)
+        val normalizedTranscriptionPrompt = normalizePromptOverride(transcriptionPrompt, defaultTranscriptionPrompt)
+        val normalizedProtocolPrompt = normalizePromptOverride(protocolPrompt, defaultProtocolPrompt)
+
         context.dataStore.edit { preferences ->
             preferences[KEY_BASE_URL] = baseUrl.trim()
             preferences[KEY_API_KEY] = apiKey.trim()
@@ -109,8 +124,16 @@ class SettingsRepository(private val context: Context) {
             preferences[KEY_TRANSCRIPTION_MODEL] = transcriptionModel.trim()
             preferences[KEY_PROTOCOL_MODEL] = protocolModel.trim()
             preferences.remove(KEY_MODEL)
-            preferences[KEY_TRANSCRIPTION_PROMPT] = transcriptionPrompt.trim()
-            preferences[KEY_PROTOCOL_PROMPT] = protocolPrompt.trim()
+            if (normalizedTranscriptionPrompt != null) {
+                preferences[KEY_TRANSCRIPTION_PROMPT] = normalizedTranscriptionPrompt
+            } else {
+                preferences.remove(KEY_TRANSCRIPTION_PROMPT)
+            }
+            if (normalizedProtocolPrompt != null) {
+                preferences[KEY_PROTOCOL_PROMPT] = normalizedProtocolPrompt
+            } else {
+                preferences.remove(KEY_PROTOCOL_PROMPT)
+            }
         }
     }
 

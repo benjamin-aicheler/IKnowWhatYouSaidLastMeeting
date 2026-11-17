@@ -23,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -56,6 +58,8 @@ fun SettingsScreen(
     var protocolModel by remember(settings) { mutableStateOf(settings.protocolModel) }
     var transcriptionPrompt by remember(settings) { mutableStateOf(settings.transcriptionPrompt) }
     var protocolPrompt by remember(settings) { mutableStateOf(settings.protocolPrompt) }
+    val defaultTranscriptionPrompt = stringResource(R.string.default_transcription_prompt)
+    val defaultProtocolPrompt = stringResource(R.string.default_protocol_prompt)
 
     LaunchedEffect(Unit) {
         viewModel.messageFlow.collect { message ->
@@ -152,23 +156,41 @@ fun SettingsScreen(
                 singleLine = true
             )
 
-            OutlinedTextField(
-                value = transcriptionPrompt,
-                onValueChange = { transcriptionPrompt = it },
-                label = { Text(stringResource(R.string.label_transcription_prompt)) },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-                maxLines = 6
-            )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = transcriptionPrompt,
+                    onValueChange = { transcriptionPrompt = it },
+                    label = { Text(stringResource(R.string.label_transcription_prompt)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 6
+                )
+                TextButton(
+                    onClick = { transcriptionPrompt = defaultTranscriptionPrompt },
+                    enabled = transcriptionPrompt.trim() != defaultTranscriptionPrompt.trim(),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(stringResource(R.string.action_reset_prompt_default))
+                }
+            }
 
-            OutlinedTextField(
-                value = protocolPrompt,
-                onValueChange = { protocolPrompt = it },
-                label = { Text(stringResource(R.string.label_protocol_prompt)) },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-                maxLines = 6
-            )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = protocolPrompt,
+                    onValueChange = { protocolPrompt = it },
+                    label = { Text(stringResource(R.string.label_protocol_prompt)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 6
+                )
+                TextButton(
+                    onClick = { protocolPrompt = defaultProtocolPrompt },
+                    enabled = protocolPrompt.trim() != defaultProtocolPrompt.trim(),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(stringResource(R.string.action_reset_prompt_default))
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 

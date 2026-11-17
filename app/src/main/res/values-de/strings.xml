@@ -105,6 +105,7 @@
     <string name="label_protocol_model">KI-Modellname für Protokoll</string>
     <string name="label_transcription_prompt">Systemprompt für Transkription</string>
     <string name="label_protocol_prompt">Systemprompt für Protokoll</string>
+    <string name="action_reset_prompt_default">Auf Standard zurücksetzen</string>
     <string name="action_save_settings">Einstellungen speichern</string>
     <string name="msg_settings_saved">Einstellungen erfolgreich gespeichert.</string>
 

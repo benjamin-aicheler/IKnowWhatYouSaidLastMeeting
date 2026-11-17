@@ -105,6 +105,7 @@
     <string name="label_protocol_model">Protocol AI Model Name</string>
     <string name="label_transcription_prompt">Transcription System Prompt</string>
     <string name="label_protocol_prompt">Protocol System Prompt</string>
+    <string name="action_reset_prompt_default">Reset to default</string>
     <string name="action_save_settings">Save Settings</string>
     <string name="msg_settings_saved">Settings saved successfully.</string>
 
