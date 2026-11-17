@@ -31,8 +31,12 @@ data class ApiSettings(
     val transcriptionModel: String,
     val protocolModel: String,
     val transcriptionPrompt: String,
-    val protocolPrompt: String
-)
+    val protocolPrompt: String,
+    val customTranscriptionPrompt: String? = null
+) {
+    fun resolveTranscriptionPrompt(useMultipart: Boolean): String =
+        customTranscriptionPrompt ?: if (useMultipart) "" else transcriptionPrompt
+}
 
 class SettingsRepository(private val context: Context) {
 
@@ -81,6 +85,10 @@ class SettingsRepository(private val context: Context) {
         val defaultTranscriptionPrompt = context.getString(R.string.default_transcription_prompt)
         val defaultProtocolPrompt = context.getString(R.string.default_protocol_prompt)
         val legacyModel = preferences[KEY_MODEL]
+        val customTranscription = normalizePromptOverride(
+            preferences[KEY_TRANSCRIPTION_PROMPT].orEmpty(),
+            defaultTranscriptionPrompt
+        )
 
         ApiSettings(
             baseUrl = preferences[KEY_BASE_URL]?.takeIf { it.isNotBlank() } ?: DEFAULT_BASE_URL,
@@ -96,10 +104,10 @@ class SettingsRepository(private val context: Context) {
                 legacyStored = legacyModel,
                 defaultModel = DEFAULT_PROTOCOL_MODEL
             ),
-            transcriptionPrompt = preferences[KEY_TRANSCRIPTION_PROMPT]?.takeIf { it.isNotBlank() }
-                ?: defaultTranscriptionPrompt,
+            transcriptionPrompt = customTranscription ?: defaultTranscriptionPrompt,
             protocolPrompt = preferences[KEY_PROTOCOL_PROMPT]?.takeIf { it.isNotBlank() }
-                ?: defaultProtocolPrompt
+                ?: defaultProtocolPrompt,
+            customTranscriptionPrompt = customTranscription
         )
     }
 

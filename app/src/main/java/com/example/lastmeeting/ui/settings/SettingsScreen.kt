@@ -161,6 +161,7 @@ fun SettingsScreen(
                     value = transcriptionPrompt,
                     onValueChange = { transcriptionPrompt = it },
                     label = { Text(stringResource(R.string.label_transcription_prompt)) },
+                    supportingText = { Text(stringResource(R.string.helper_transcription_prompt)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 6

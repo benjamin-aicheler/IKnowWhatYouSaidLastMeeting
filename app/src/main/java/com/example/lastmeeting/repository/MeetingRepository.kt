@@ -215,6 +215,12 @@ class MeetingRepository(
             return Result.failure(Exception(context.getString(R.string.msg_missing_api_key)))
         }
 
+        val useMultipart = apiClient.shouldUseMultipartTranscription(
+            baseUrl = settings.baseUrl,
+            transcriptionMode = settings.transcriptionMode
+        )
+        val effectivePrompt = settings.resolveTranscriptionPrompt(useMultipart)
+
         val session = audioSegmenter.segmentIfNeeded(audioFile, OpenAiApiClient.MAX_AUDIO_UPLOAD_BYTES)
             .getOrElse { error ->
                 return Result.failure(
@@ -234,7 +240,7 @@ class MeetingRepository(
                     baseUrl = settings.baseUrl,
                     apiKey = settings.apiKey,
                     model = settings.transcriptionModel,
-                    prompt = settings.transcriptionPrompt,
+                    prompt = effectivePrompt,
                     audioFile = segment,
                     transcriptionMode = settings.transcriptionMode
                 )

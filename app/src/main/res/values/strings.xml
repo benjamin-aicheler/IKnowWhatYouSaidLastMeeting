@@ -104,6 +104,7 @@
     <string name="label_transcription_model">Transcription AI Model Name</string>
     <string name="label_protocol_model">Protocol AI Model Name</string>
     <string name="label_transcription_prompt">Transcription System Prompt</string>
+    <string name="helper_transcription_prompt">Used as the instruction for Chat Audio. For /v1/audio/transcriptions, the built-in instruction is omitted unless you enter custom vocabulary or context hints.</string>
     <string name="label_protocol_prompt">Protocol System Prompt</string>
     <string name="action_reset_prompt_default">Reset to default</string>
     <string name="action_save_settings">Save Settings</string>

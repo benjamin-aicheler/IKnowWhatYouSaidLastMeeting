@@ -104,6 +104,7 @@
     <string name="label_transcription_model">KI-Modellname für Transkription</string>
     <string name="label_protocol_model">KI-Modellname für Protokoll</string>
     <string name="label_transcription_prompt">Systemprompt für Transkription</string>
+    <string name="helper_transcription_prompt">Wird bei Chat-Audio als Anweisung genutzt. Bei /v1/audio/transcriptions wird die Standardanweisung weggelassen, sofern Sie keine eigenen Begriffe oder Kontexthinweise eingeben.</string>
     <string name="label_protocol_prompt">Systemprompt für Protokoll</string>
     <string name="action_reset_prompt_default">Auf Standard zurücksetzen</string>
     <string name="action_save_settings">Einstellungen speichern</string>
