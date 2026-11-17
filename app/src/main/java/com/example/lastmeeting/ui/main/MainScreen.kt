@@ -67,15 +67,13 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.lastmeeting.R
 import com.example.lastmeeting.data.db.MeetingEntity
-import java.text.SimpleDateFormat
-import java.time.DayOfWeek
+import com.example.lastmeeting.util.DateTimeFormatters
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
-import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -291,8 +289,9 @@ fun MeetingItemCard(
     onClick: () -> Unit
 ) {
     val locale = LocalLocale.current.platformLocale
-    val dateFormat = remember(locale) { SimpleDateFormat("yyyy-MM-dd HH:mm", locale) }
-    val formattedDate = remember(meeting.startTime, dateFormat) { dateFormat.format(Date(meeting.startTime)) }
+    val formattedDate = remember(meeting.startTime, locale) {
+        DateTimeFormatters.formatLocalizedDateTime(meeting.startTime, locale)
+    }
 
     val durationSeconds = ((meeting.endTime - meeting.startTime) / 1000).coerceAtLeast(0L)
     val durationText = String.format(locale, "%02d:%02d", durationSeconds / 60, durationSeconds % 60)
@@ -349,10 +348,9 @@ fun CalendarViewComponent(
     onMeetingClick: (Long) -> Unit
 ) {
     val locale = LocalLocale.current.platformLocale
-    val dayFormat = remember(locale) { SimpleDateFormat("yyyy-MM-dd", locale) }
 
-    val groupedMeetings = remember(meetings, dayFormat) {
-        meetings.groupBy { dayFormat.format(Date(it.startTime)) }
+    val groupedMeetings = remember(meetings) {
+        meetings.groupBy { DateTimeFormatters.toIsoDateKey(it.startTime) }
     }
 
     var currentMonth by remember {
@@ -395,7 +393,7 @@ fun CalendarViewComponent(
                 FilterChip(
                     selected = true,
                     onClick = { onDateSelected(null) },
-                    label = { Text("$selectedDate ✕") }
+                    label = { Text("${DateTimeFormatters.formatLocalizedDate(selectedDate, locale)} ✕") }
                 )
                 FilterChip(
                     selected = false,
@@ -435,7 +433,7 @@ fun CalendarViewComponent(
                             .padding(vertical = 4.dp)
                     ) {
                         Text(
-                            text = dateStr,
+                            text = DateTimeFormatters.formatLocalizedDate(dateStr, locale),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
@@ -467,17 +465,7 @@ private fun MonthCalendarCard(
     val locale = LocalLocale.current.platformLocale
     val monthFormatter = remember(locale) { DateTimeFormatter.ofPattern("MMMM yyyy", locale) }
     val isoFormatter = remember { DateTimeFormatter.ISO_LOCAL_DATE }
-    val daysOfWeek = remember {
-        listOf(
-            DayOfWeek.MONDAY,
-            DayOfWeek.TUESDAY,
-            DayOfWeek.WEDNESDAY,
-            DayOfWeek.THURSDAY,
-            DayOfWeek.FRIDAY,
-            DayOfWeek.SATURDAY,
-            DayOfWeek.SUNDAY
-        )
-    }
+    val daysOfWeek = remember(locale) { DateTimeFormatters.orderedWeekDays(locale) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -522,8 +510,7 @@ private fun MonthCalendarCard(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            val firstDayOfMonth = currentMonth.atDay(1)
-            val leadingEmptyCells = firstDayOfMonth.dayOfWeek.value - 1 // Monday = 0
+            val leadingEmptyCells = DateTimeFormatters.leadingEmptyCells(currentMonth, locale)
             val daysInMonth = currentMonth.lengthOfMonth()
             val totalCells = ((leadingEmptyCells + daysInMonth + 6) / 7) * 7
 
