@@ -398,6 +398,14 @@ fun MeetingDetailsScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (currentMeeting.transcript != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        currentMeeting.transcriptError?.takeIf { it.isNotBlank() }?.let { errorMsg ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.msg_ai_error, errorMsg),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
 
@@ -472,6 +480,14 @@ fun MeetingDetailsScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (currentMeeting.protocol != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        currentMeeting.protocolError?.takeIf { it.isNotBlank() }?.let { errorMsg ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.msg_ai_error, errorMsg),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             }

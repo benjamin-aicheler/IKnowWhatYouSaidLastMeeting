@@ -1,18 +1,23 @@
 package com.example.lastmeeting.worker
 
+import android.Manifest
 import android.app.Application
+import android.app.NotificationManager
 import androidx.work.ListenableWorker
 import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.workDataOf
 import com.example.lastmeeting.LastMeetingApp
+import com.example.lastmeeting.R
 import com.example.lastmeeting.data.db.MeetingEntity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -48,6 +53,46 @@ class AiProcessingWorkerTest {
             val meeting = dao.getMeetingByIdDirect(id)!!
             assertNull(if (task == AiProcessingWorker.TASK_TRANSCRIBE) meeting.transcript else meeting.protocol)
         }
+    }
+
+    @Test
+    @Config(application = LastMeetingApp::class)
+    fun terminalFailurePersistsTaskErrorAndPostsNotification() = runBlocking {
+        val app = RuntimeEnvironment.getApplication() as LastMeetingApp
+        Shadows.shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val dao = app.database.meetingDao()
+        val id = dao.insertMeeting(
+            MeetingEntity(
+                title = "Broken audio meeting",
+                startTime = 1L,
+                endTime = 2L,
+                audioFilePath = "/missing.m4a",
+                transcript = null,
+                protocol = null
+            )
+        )
+        val input = workDataOf(
+            AiProcessingWorker.KEY_MEETING_ID to id,
+            AiProcessingWorker.KEY_TASK_TYPE to AiProcessingWorker.TASK_TRANSCRIBE,
+            AiProcessingWorker.KEY_GENERATION to 0L
+        )
+        val worker = TestListenableWorkerBuilder<AiProcessingWorker>(app)
+            .setInputData(input)
+            .setRunAttemptCount(0)
+            .build()
+
+        val result = worker.doWork()
+        val expectedError = app.getString(R.string.msg_audio_not_found)
+        assertEquals(ListenableWorker.Result.failure(workDataOf(AiProcessingWorker.KEY_ERROR_MESSAGE to expectedError)), result)
+        assertEquals(expectedError, dao.getMeetingByIdDirect(id)!!.transcriptError)
+
+        val notificationManager = app.getSystemService(NotificationManager::class.java)
+        val postedTitles = Shadows.shadowOf(notificationManager).allNotifications
+            .map { it.extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() }
+        assertTrue(postedTitles.contains(app.getString(R.string.ai_notification_transcript_failed)))
+
+        assertEquals(1, dao.updateTranscript(id, "Recovered", 0L))
+        assertNull(dao.getMeetingByIdDirect(id)!!.transcriptError)
     }
 
     private fun discarded() = ListenableWorker.Result.success(workDataOf(AiProcessingWorker.KEY_DISCARDED to true))
