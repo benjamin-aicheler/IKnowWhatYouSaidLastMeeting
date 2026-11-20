@@ -74,6 +74,7 @@ fun MeetingDetailsScreen(
     val isTranscribing by viewModel.isTranscribing.collectAsState()
     val isProtocolizing by viewModel.isProtocolizing.collectAsState()
     val isPlayingAudio by viewModel.isPlayingAudio.collectAsState()
+    val isPreparingAudio by viewModel.isPreparingAudio.collectAsState()
     val audioPositionMs by viewModel.audioPositionMs.collectAsState()
     val audioDurationMs by viewModel.audioDurationMs.collectAsState()
     val showTranscriptionConfirmation by viewModel.showTranscriptionConfirmation.collectAsState()
@@ -264,7 +265,10 @@ fun MeetingDetailsScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Button(onClick = { viewModel.toggleAudioPlayback() }) {
+                            Button(
+                                onClick = { viewModel.toggleAudioPlayback() },
+                                enabled = !isPreparingAudio
+                            ) {
                                 Icon(
                                     imageVector = if (isPlayingAudio) AppIcons.Pause else AppIcons.PlayArrow,
                                     contentDescription = null

@@ -129,4 +129,5 @@
     <string name="action_copy_transcript">Copy transcript</string>
     <string name="action_copy_protocol">Copy protocol</string>
     <string name="msg_copied_to_clipboard">Copied to clipboard.</string>
+    <string name="msg_audio_focus_denied">Audio playback could not start because another app is using audio.</string>
 </resources>
