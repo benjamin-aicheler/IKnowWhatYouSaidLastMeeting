@@ -4,6 +4,11 @@ import android.app.Application
 import android.content.Context
 import androidx.room.Room
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -14,6 +19,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.util.ReflectionHelpers
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
@@ -224,6 +230,72 @@ class MeetingGenerationPersistenceTest {
 
             assertEquals(1, dao.updateProtocol(original.id, "New protocol", 1L))
             assertNull(dao.getMeetingByIdDirect(original.id)!!.protocolError)
+        }
+    }
+
+    @Test
+    fun exportedSchemasExistAndVersionOneSchemaMigratesToLatest() = runBlocking {
+        val schemaDir = File("schemas/com.example.lastmeeting.data.db.MeetingDatabase")
+            .takeIf { it.isDirectory }
+            ?: File("app/schemas/com.example.lastmeeting.data.db.MeetingDatabase")
+        assertTrue("Missing Room schema directory: ${schemaDir.absolutePath}", schemaDir.isDirectory)
+
+        val expectedColumnCounts = mapOf(1 to 8, 2 to 10, 3 to 11, 4 to 13)
+        val expectedHashes = mapOf(
+            1 to "c30fb1d438ce5cf6490b34d5f80a1c7a",
+            2 to "35c86cf2861ca546d22b18eb1eb7fb43",
+            3 to "7a8b94d3b15e7c9f083287c07b15e8d1",
+            4 to "538204fb3d5e2b3cb145912712c6f2de"
+        )
+
+        var versionOneCreateSql = ""
+        for (version in 1..4) {
+            val schemaFile = File(schemaDir, "$version.json")
+            assertTrue("Missing exported schema $version.json", schemaFile.isFile)
+            val database = Json.parseToJsonElement(schemaFile.readText())
+                .jsonObject["database"]!!.jsonObject
+            assertEquals(version, database["version"]!!.jsonPrimitive.int)
+            assertEquals(expectedHashes[version], database["identityHash"]!!.jsonPrimitive.content)
+            val entity = database["entities"]!!.jsonArray.single().jsonObject
+            assertEquals("meetings", entity["tableName"]!!.jsonPrimitive.content)
+            assertEquals(expectedColumnCounts[version], entity["fields"]!!.jsonArray.size)
+            if (version == 1) {
+                versionOneCreateSql = entity["createSql"]!!.jsonPrimitive.content
+                    .replace("\${TABLE_NAME}", "meetings")
+            }
+        }
+
+        val context = RuntimeEnvironment.getApplication()
+        val name = "schema-exported-v1-to-v4.db"
+        val original = meeting().copy(id = 17L)
+        context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).use { database ->
+            database.execSQL(versionOneCreateSql)
+            database.execSQL(
+                "INSERT INTO meetings VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                arrayOf<Any?>(
+                    original.id,
+                    original.title,
+                    original.startTime,
+                    original.endTime,
+                    original.audioFilePath,
+                    original.transcript,
+                    original.protocol,
+                    original.createdAt
+                )
+            )
+            database.version = 1
+        }
+
+        open(context, name).useDatabase { database ->
+            val dao = database.meetingDao()
+            assertEquals(4, database.openHelper.readableDatabase.version)
+            val migrated = dao.getMeetingByIdDirect(original.id)!!
+            assertEquals(original, migrated)
+            assertEquals(0L, migrated.transcriptGeneration)
+            assertEquals(0L, migrated.protocolGeneration)
+            assertFalse(migrated.isDamaged)
+            assertNull(migrated.transcriptError)
+            assertNull(migrated.protocolError)
         }
     }
 
