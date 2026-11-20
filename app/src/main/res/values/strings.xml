@@ -124,4 +124,9 @@
     <string name="consent_notice_title">Privacy &amp; Recording Consent</string>
     <string name="consent_notice_message">Recordings, transcripts, and protocols are stored locally on your device. When you start AI transcription or protocol generation, the audio recording or transcript is sent to the API endpoint configured in Settings.\n\nAlways inform all participants and obtain their consent before recording a meeting. Legal requirements vary by country.</string>
     <string name="consent_notice_acknowledge">Got it</string>
+
+    <!-- Clipboard -->
+    <string name="action_copy_transcript">Copy transcript</string>
+    <string name="action_copy_protocol">Copy protocol</string>
+    <string name="msg_copied_to_clipboard">Copied to clipboard.</string>
 </resources>

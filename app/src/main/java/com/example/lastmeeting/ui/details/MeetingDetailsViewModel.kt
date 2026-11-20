@@ -13,6 +13,8 @@ import com.example.lastmeeting.R
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.util.ShareUtil
 import com.example.lastmeeting.worker.AiProcessingWorker
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -83,6 +86,12 @@ class MeetingDetailsViewModel(
     private val _isPlayingAudio = MutableStateFlow(false)
     val isPlayingAudio: StateFlow<Boolean> = _isPlayingAudio.asStateFlow()
 
+    private val _audioPositionMs = MutableStateFlow(0)
+    val audioPositionMs: StateFlow<Int> = _audioPositionMs.asStateFlow()
+
+    private val _audioDurationMs = MutableStateFlow(0)
+    val audioDurationMs: StateFlow<Int> = _audioDurationMs.asStateFlow()
+
     private val _eventFlow = MutableSharedFlow<DetailsUiEvent>()
     val eventFlow: SharedFlow<DetailsUiEvent> = _eventFlow.asSharedFlow()
 
@@ -93,6 +102,7 @@ class MeetingDetailsViewModel(
 
     private var mediaPlayer: MediaPlayer? = null
     private var isAudioPaused: Boolean = false
+    private var progressJob: Job? = null
 
     init {
         observeWorkCompletion(
@@ -178,6 +188,9 @@ class MeetingDetailsViewModel(
                 existingPlayer.start()
                 isAudioPaused = false
                 _isPlayingAudio.value = true
+                _audioDurationMs.value = existingPlayer.duration.coerceAtLeast(0)
+                _audioPositionMs.value = existingPlayer.currentPosition.coerceAtLeast(0)
+                startProgressUpdates()
                 return
             }
 
@@ -193,6 +206,9 @@ class MeetingDetailsViewModel(
             mediaPlayer = player
             isAudioPaused = false
             _isPlayingAudio.value = true
+            _audioDurationMs.value = player.duration.coerceAtLeast(0)
+            _audioPositionMs.value = player.currentPosition.coerceAtLeast(0)
+            startProgressUpdates()
         } catch (e: Exception) {
             Log.e("MeetingDetailsVM", "Audio playback error", e)
             stopAudioPlayer()
@@ -206,10 +222,38 @@ class MeetingDetailsViewModel(
         }
     }
 
+    private fun startProgressUpdates() {
+        progressJob?.cancel()
+        progressJob = viewModelScope.launch {
+            while (isActive && _isPlayingAudio.value) {
+                val player = mediaPlayer ?: break
+                runCatching {
+                    _audioPositionMs.value = player.currentPosition.coerceAtLeast(0)
+                }
+                delay(200L)
+            }
+        }
+    }
+
+    fun seekAudioTo(positionMs: Int) {
+        val duration = _audioDurationMs.value
+        val clamped = if (duration > 0) positionMs.coerceIn(0, duration) else 0
+        val player = mediaPlayer ?: return
+        runCatching {
+            player.seekTo(clamped)
+            _audioPositionMs.value = clamped
+        }.onFailure { error ->
+            Log.w("MeetingDetailsVM", "Audio seek error", error)
+        }
+    }
+
     private fun pauseAudio() {
+        progressJob?.cancel()
+        progressJob = null
         try {
             mediaPlayer?.pause()
             isAudioPaused = true
+            _audioPositionMs.value = mediaPlayer?.currentPosition?.coerceAtLeast(0) ?: _audioPositionMs.value
         } catch (e: Exception) {
             Log.e("MeetingDetailsVM", "Audio pause error", e)
         }
@@ -217,6 +261,8 @@ class MeetingDetailsViewModel(
     }
 
     private fun stopAudioPlayer() {
+        progressJob?.cancel()
+        progressJob = null
         try {
             mediaPlayer?.stop()
         } catch (_: Exception) {
@@ -228,6 +274,8 @@ class MeetingDetailsViewModel(
         mediaPlayer = null
         isAudioPaused = false
         _isPlayingAudio.value = false
+        _audioPositionMs.value = 0
+        _audioDurationMs.value = 0
     }
 
     fun transcribe() {
