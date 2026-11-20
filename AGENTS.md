@@ -36,6 +36,7 @@
 - **Transcription**:
   - **Automatic (`TranscriptionMode.AUTO`, default)**: Uses `POST /v1/audio/transcriptions` (`multipart/form-data`) for OpenAI hosts (`api.openai.com`) and `POST /v1/chat/completions` (`input_audio` base64 `m4a`) for other hosts.
   - **Explicit Override (`TranscriptionMode.AUDIO_TRANSCRIPTIONS` / `CHAT_COMPLETIONS`)**: Users can override the routing mode in Settings to force multipart `/audio/transcriptions` (e.g., Groq, LiteLLM, faster-whisper) or multimodal `chat/completions` regardless of hostname.
+  - **Prompt Policy**: The built-in localized transcription instruction is sent only on the `chat/completions` audio route; `/audio/transcriptions` omits `prompt` unless the user configures custom vocabulary/context hints.
   - **Large Recordings (> 25 MB)**: Recordings exceeding the 25 MB upload limit are automatically split into temporary M4A segments at sample boundaries using `MediaExtractor`/`MediaMuxer` (outside `filesDir/recordings`), transcribed sequentially, and merged in order; `OpenAiApiClient` also enforces the 25 MB per-upload guard as a non-retryable failure.
 - **Protocol Generation**:
   - Uses `POST /v1/chat/completions` with `model = protocolModel`, sending **text only** (`protocolSystemPrompt` and the meeting's existing `transcript` text). Protocol generation requires a transcript to exist first and never re-uploads the audio file.

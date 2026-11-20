@@ -85,4 +85,31 @@ class PromptSettingsPersistenceTest {
         assertEquals(deTranscriptionDefault, afterResetDe.transcriptionPrompt)
         assertEquals(deProtocolDefault, afterResetDe.protocolPrompt)
     }
+
+    @Test
+    fun resolveTranscriptionPromptOmitsBuiltInInstructionOnMultipartEndpointOnly() = runBlocking {
+        val app = RuntimeEnvironment.getApplication()
+        val repository = SettingsRepository(app)
+        val enTranscriptionDefault = app.getString(R.string.default_transcription_prompt)
+        val enProtocolDefault = app.getString(R.string.default_protocol_prompt)
+
+        val uncustomized = repository.settingsFlow.first()
+        assertNull(uncustomized.customTranscriptionPrompt)
+        assertEquals("", uncustomized.resolveTranscriptionPrompt(useMultipart = true))
+        assertEquals(enTranscriptionDefault, uncustomized.resolveTranscriptionPrompt(useMultipart = false))
+
+        repository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "sk-test",
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Project names: Phoenix, Apollo",
+            protocolPrompt = enProtocolDefault
+        )
+
+        val customized = repository.settingsFlow.first()
+        assertEquals("Project names: Phoenix, Apollo", customized.customTranscriptionPrompt)
+        assertEquals("Project names: Phoenix, Apollo", customized.resolveTranscriptionPrompt(useMultipart = true))
+        assertEquals("Project names: Phoenix, Apollo", customized.resolveTranscriptionPrompt(useMultipart = false))
+    }
 }

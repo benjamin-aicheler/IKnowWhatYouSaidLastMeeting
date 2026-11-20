@@ -6,6 +6,7 @@ import com.example.lastmeeting.data.api.OpenAiApiClient
 import com.example.lastmeeting.data.db.MeetingDao
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.data.preferences.SettingsRepository
+import com.example.lastmeeting.data.preferences.TranscriptionMode
 import com.example.lastmeeting.util.AndroidAudioSegmenter
 import com.example.lastmeeting.util.AudioSegmentationSession
 import com.example.lastmeeting.util.AudioSegmenter
@@ -24,6 +25,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -456,6 +458,72 @@ class MeetingRepositoryAiTest {
         assertEquals(1, calls.get())
         assertTrue(cleanedUp)
         assertNull(dao.getMeetingByIdDirect(id)!!.transcript)
+    }
+
+    @Test
+    fun defaultInstructionPromptIsOmittedOnMultipartButSentOnChatAndCustomSentOnBoth() = runBlocking {
+        var capturedRequest: Request? = null
+        val interceptor = Interceptor { chain ->
+            capturedRequest = chain.request()
+            response(chain.request(), "Transcribed text")
+        }
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = settingsRepository,
+            apiClient = OpenAiApiClient(httpClient = OkHttpClient.Builder().addInterceptor(interceptor).build())
+        )
+        val id = insertAiMeeting()
+        val defaultInstruction = app.getString(R.string.default_transcription_prompt)
+
+        // Default prompt on multipart (/audio/transcriptions) -> omitted (2 parts: file + model).
+        settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "test-key",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = defaultInstruction,
+            protocolPrompt = app.getString(R.string.default_protocol_prompt)
+        )
+        repository.transcribeMeeting(id, 0L).getOrThrow()
+        val defaultMultipart = capturedRequest!!.body as MultipartBody
+        assertEquals(2, defaultMultipart.size)
+
+        // Default prompt on chat audio -> sends the localized instruction.
+        settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "test-key",
+            transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = defaultInstruction,
+            protocolPrompt = app.getString(R.string.default_protocol_prompt)
+        )
+        repository.transcribeMeeting(id, 0L).getOrThrow()
+        val chatBuffer = Buffer()
+        capturedRequest.body!!.writeTo(chatBuffer)
+        val chatRoot = Json.parseToJsonElement(chatBuffer.readUtf8()).jsonObject
+        val chatPrompt = chatRoot["messages"]!!.jsonArray[0].jsonObject["content"]!!.jsonArray[0]
+            .jsonObject["text"]!!.jsonPrimitive.content
+        assertEquals(defaultInstruction, chatPrompt)
+
+        // Custom prompt on multipart -> included as the 3rd multipart part.
+        settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "test-key",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Vocabulary: Kubernetes, gRPC",
+            protocolPrompt = app.getString(R.string.default_protocol_prompt)
+        )
+        repository.transcribeMeeting(id, 0L).getOrThrow()
+        val customMultipart = capturedRequest.body as MultipartBody
+        assertEquals(3, customMultipart.size)
+        val promptBuffer = Buffer()
+        customMultipart.part(2).body.writeTo(promptBuffer)
+        assertEquals("Vocabulary: Kubernetes, gRPC", promptBuffer.readUtf8())
     }
 
     private suspend fun configuredRepository(
