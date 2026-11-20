@@ -13,6 +13,7 @@
 
 - 🤖 **AI Transcription & Protocolization**:
   - Transcribes `.m4a` recordings directly via OpenAI's `/v1/audio/transcriptions` endpoint, while preserving `/v1/chat/completions` (`input_audio` base64 `m4a`) for custom multimodal endpoints (e.g., **OpenRouter**, **Gemini**).
+  - Automatically splits recordings larger than 25 MB into sample-aligned `.m4a` segments, transcribes them sequentially, and merges the transcripts.
   - Generates structured protocols from the **text transcript** via `/v1/chat/completions`—audio is only uploaded once.
   - Separate configurable models and system prompts for transcription (`gpt-4o-mini-transcribe` default) and executive protocol creation (`gpt-4o-mini` default).
 

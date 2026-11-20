@@ -91,6 +91,8 @@
     <string name="msg_ai_error">KI-Fehler: %1$s</string>
     <string name="msg_missing_api_key">Bitte konfigurieren Sie zuerst Ihren API-Schlüssel in den Einstellungen.</string>
     <string name="msg_transcribe_first">Bitte transkribieren Sie die Sitzung zuerst, bevor Sie ein Protokoll erstellen.</string>
+    <string name="msg_audio_too_large">Die Aufnahme überschreitet das Upload-Limit von 25 MB und konnte nicht gesendet werden.</string>
+    <string name="msg_audio_too_large_split_failed">Die Aufnahme ist größer als 25 MB und konnte nicht in kleinere Audiosegmente aufgeteilt werden.</string>
     <string name="msg_exported_pdf">PDF wurde unter Downloads/LastMeeting gespeichert.</string>
 
     <!-- Settings -->

@@ -1,5 +1,6 @@
 package com.example.lastmeeting
 
+import com.example.lastmeeting.data.api.AudioFileTooLargeException
 import com.example.lastmeeting.data.api.OpenAiApiClient
 import com.example.lastmeeting.data.preferences.SettingsRepository
 import com.example.lastmeeting.service.AndroidAudioRecorder
@@ -24,7 +25,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.io.RandomAccessFile
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicInteger
 
 class OpenAiApiClientTest {
 
@@ -308,5 +311,36 @@ class OpenAiApiClientTest {
             "Alice: Let's ship v1.0 on Friday.\nBob: Agreed.",
             messages[1].jsonObject["content"]?.jsonPrimitive?.content
         )
+    }
+
+    @Test
+    fun testAudioFileAbove25MbLimitFailsWithoutCallingNetwork() = runBlocking {
+        val calls = AtomicInteger(0)
+        val httpClient = OkHttpClient.Builder()
+            .addInterceptor(Interceptor {
+                calls.incrementAndGet()
+                error("Network should not be called for oversized files")
+            })
+            .build()
+        val client = OpenAiApiClient(httpClient = httpClient)
+        val tempFile = File.createTempFile("meeting_oversized", ".m4a")
+        RandomAccessFile(tempFile, "rw").use { raf ->
+            raf.setLength(OpenAiApiClient.MAX_AUDIO_UPLOAD_BYTES + 1)
+        }
+
+        try {
+            val result = client.transcribeAudio(
+                baseUrl = "https://api.openai.com/v1/",
+                apiKey = "sk-test",
+                model = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+                prompt = "Transcribe this",
+                audioFile = tempFile
+            )
+            assertTrue(result.isFailure)
+            assertTrue(result.exceptionOrNull() is AudioFileTooLargeException)
+            assertEquals(0, calls.get())
+        } finally {
+            tempFile.delete()
+        }
     }
 }

@@ -1,6 +1,7 @@
 package com.example.lastmeeting.worker
 
 import com.example.lastmeeting.data.api.ApiHttpException
+import com.example.lastmeeting.data.api.AudioFileTooLargeException
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,6 +33,12 @@ class AiRetryPolicyTest {
     fun doesNotRetryConfigurationAndDataErrors() {
         assertFalse(AiRetryPolicy.isRetryable(IllegalArgumentException("API key is missing."), 0))
         assertFalse(AiRetryPolicy.isRetryable(Exception("Meeting not found."), 0))
+        assertFalse(
+            AiRetryPolicy.isRetryable(
+                AudioFileTooLargeException(30_000_000L, 25L * 1024L * 1024L, "too large"),
+                0
+            )
+        )
     }
 
     @Test

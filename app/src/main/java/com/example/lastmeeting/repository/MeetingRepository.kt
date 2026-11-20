@@ -2,10 +2,13 @@ package com.example.lastmeeting.repository
 
 import android.content.Context
 import com.example.lastmeeting.R
+import com.example.lastmeeting.data.api.AudioFileTooLargeException
 import com.example.lastmeeting.data.api.OpenAiApiClient
 import com.example.lastmeeting.data.db.MeetingDao
 import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.data.preferences.SettingsRepository
+import com.example.lastmeeting.util.AndroidAudioSegmenter
+import com.example.lastmeeting.util.AudioSegmenter
 import com.example.lastmeeting.util.PdfExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -22,7 +25,8 @@ class MeetingRepository(
     private val settingsRepository: SettingsRepository,
     private val apiClient: OpenAiApiClient = OpenAiApiClient(),
     private val deleteAudioFile: (File) -> Boolean = File::delete,
-    private val recordingsDir: File = File(context.filesDir, "recordings")
+    private val recordingsDir: File = File(context.filesDir, "recordings"),
+    private val audioSegmenter: AudioSegmenter = AndroidAudioSegmenter { File(context.cacheDir, "audio_segments") }
 ) {
 
     private val recordingLock = Any()
@@ -261,20 +265,55 @@ class MeetingRepository(
             return Result.failure(Exception(context.getString(R.string.msg_missing_api_key)))
         }
 
-        val result = apiClient.transcribeAudio(
-            baseUrl = settings.baseUrl,
-            apiKey = settings.apiKey,
-            model = settings.transcriptionModel,
-            prompt = settings.transcriptionPrompt,
-            audioFile = audioFile
-        )
-
-        return result.map { text ->
-            if (meetingDao.updateTranscript(id, text, generation) > 0) {
-                AiGenerationOutcome.Stored(text)
-            } else {
-                AiGenerationOutcome.Discarded
+        val session = audioSegmenter.segmentIfNeeded(audioFile, OpenAiApiClient.MAX_AUDIO_UPLOAD_BYTES)
+            .getOrElse { error ->
+                return Result.failure(
+                    IllegalArgumentException(context.getString(R.string.msg_audio_too_large_split_failed), error)
+                )
             }
+
+        return try {
+            val transcriptParts = mutableListOf<String>()
+            for (segment in session.segments) {
+                val latest = meetingDao.getMeetingByIdDirect(id)
+                if (latest == null || latest.transcriptGeneration != generation) {
+                    return Result.success(AiGenerationOutcome.Discarded)
+                }
+
+                val segmentResult = apiClient.transcribeAudio(
+                    baseUrl = settings.baseUrl,
+                    apiKey = settings.apiKey,
+                    model = settings.transcriptionModel,
+                    prompt = settings.transcriptionPrompt,
+                    audioFile = segment
+                )
+                val segmentText = segmentResult.getOrElse { error ->
+                    if (error is AudioFileTooLargeException) {
+                        return Result.failure(
+                            AudioFileTooLargeException(
+                                fileSizeBytes = error.fileSizeBytes,
+                                maxBytes = error.maxBytes,
+                                message = context.getString(R.string.msg_audio_too_large)
+                            )
+                        )
+                    }
+                    return Result.failure(error)
+                }
+                transcriptParts.add(segmentText)
+            }
+
+            val mergedText = transcriptParts
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .joinToString("\n\n")
+
+            if (meetingDao.updateTranscript(id, mergedText, generation) > 0) {
+                Result.success(AiGenerationOutcome.Stored(mergedText))
+            } else {
+                Result.success(AiGenerationOutcome.Discarded)
+            }
+        } finally {
+            session.cleanup()
         }
     }
 

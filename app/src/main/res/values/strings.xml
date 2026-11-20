@@ -91,6 +91,8 @@
     <string name="msg_ai_error">AI Error: %1$s</string>
     <string name="msg_missing_api_key">Please configure your API Key in Settings first.</string>
     <string name="msg_transcribe_first">Please transcribe the meeting first before generating a protocol.</string>
+    <string name="msg_audio_too_large">Recording exceeds the 25 MB upload limit and could not be sent.</string>
+    <string name="msg_audio_too_large_split_failed">Recording exceeds 25 MB and could not be split into smaller audio segments.</string>
     <string name="msg_exported_pdf">PDF exported to Downloads/LastMeeting.</string>
 
     <!-- Settings -->
