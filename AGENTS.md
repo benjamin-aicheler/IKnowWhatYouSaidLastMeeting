@@ -47,7 +47,7 @@
   - `protocolSystemPrompt` (default provided, customizable by user)
 
 ### UI & Navigation
-- **Main Screen**: Toggle button to switch between **List View** and **Calendar View**.
+- **Main Screen**: Toggle button to switch between **List View** and **Calendar View**. Shows a one-time privacy and recording-consent notice dialog until acknowledged by the user (persisted in `SettingsRepository`).
 - **Meeting Details View**:
   - Edit title
   - Trigger audio transcription via AI

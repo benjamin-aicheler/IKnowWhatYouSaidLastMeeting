@@ -106,4 +106,9 @@
     <!-- Default Prompts -->
     <string name="default_transcription_prompt">Du bist ein präziser Assistent für Audiotranskription. Höre dir das bereitgestellte Sitzungsaudio an und erstelle ein wörtliches, genaues Transkript. Gib ausschließlich den Transkripttext aus.</string>
     <string name="default_protocol_prompt">Du bist ein professioneller Sitzungsassistent. Lies das bereitgestellte Sitzungstranskript und erstelle ein klares, strukturiertes Sitzungsprotokoll. Enthalte: 1. Zusammenfassung, 2. Hauptdiskussionspunkte, 3. Wichtige Entscheidungen und 4. Nächste Schritte &amp; Aufgaben.</string>
+
+    <!-- Privacy & Consent Notice -->
+    <string name="consent_notice_title">Datenschutz &amp; Einwilligung zur Aufnahme</string>
+    <string name="consent_notice_message">Aufnahmen, Transkripte und Protokolle werden lokal auf Ihrem Gerät gespeichert. Wenn Sie eine KI-Transkription oder Protokollerstellung starten, wird die Audioaufnahme bzw. das Transkript an den in den Einstellungen konfigurierten API-Endpunkt gesendet.\n\nInformieren Sie stets alle Teilnehmenden und holen Sie deren Einwilligung ein, bevor Sie eine Sitzung aufnehmen. Die gesetzlichen Vorgaben variieren je nach Land.</string>
+    <string name="consent_notice_acknowledge">Verstanden</string>
 </resources>

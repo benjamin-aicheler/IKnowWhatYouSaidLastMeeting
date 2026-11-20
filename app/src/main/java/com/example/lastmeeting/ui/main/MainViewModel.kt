@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -41,6 +42,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+
+    val showConsentNotice: StateFlow<Boolean> = app.settingsRepository.consentNoticeAcknowledgedFlow
+        .map { acknowledged -> !acknowledged }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
+    fun acknowledgeConsentNotice() {
+        viewModelScope.launch {
+            app.settingsRepository.acknowledgeConsentNotice()
+        }
+    }
 
     private val _viewMode = MutableStateFlow(MainViewMode.LIST)
     val viewMode: StateFlow<MainViewMode> = _viewMode.asStateFlow()
