@@ -20,14 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -63,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.lastmeeting.R
 import com.example.lastmeeting.ui.components.DeleteConfirmationDialog
+import com.example.lastmeeting.ui.theme.AppIcons
 import com.example.lastmeeting.util.DateTimeFormatters
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -138,7 +131,7 @@ fun MeetingDetailsScreen(
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = AppIcons.ArrowBack,
                             contentDescription = stringResource(R.string.action_back)
                         )
                     }
@@ -146,7 +139,7 @@ fun MeetingDetailsScreen(
                 actions = {
                     IconButton(onClick = { showDeleteMeetingDialog = true }) {
                         Icon(
-                            imageVector = Icons.Default.Delete,
+                            imageVector = AppIcons.Delete,
                             contentDescription = stringResource(R.string.action_delete_meeting),
                             tint = MaterialTheme.colorScheme.error
                         )
@@ -215,7 +208,7 @@ fun MeetingDetailsScreen(
                                 )
                                 IconButton(onClick = { isEditingTitle = true }) {
                                     Icon(
-                                        imageVector = Icons.Default.Edit,
+                                        imageVector = AppIcons.Edit,
                                         contentDescription = stringResource(R.string.action_edit_title)
                                     )
                                 }
@@ -261,19 +254,19 @@ fun MeetingDetailsScreen(
                         ) {
                             Button(onClick = { viewModel.toggleAudioPlayback() }) {
                                 Icon(
-                                    imageVector = if (isPlayingAudio) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    imageVector = if (isPlayingAudio) AppIcons.Pause else AppIcons.PlayArrow,
                                     contentDescription = null
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(if (isPlayingAudio) stringResource(R.string.action_pause) else stringResource(R.string.action_play))
                             }
                             OutlinedButton(onClick = { exportToDownloads { viewModel.downloadAudio() } }) {
-                                Icon(imageVector = Icons.Default.Download, contentDescription = null)
+                                Icon(imageVector = AppIcons.Download, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(stringResource(R.string.action_download_audio))
                             }
                             OutlinedButton(onClick = { viewModel.shareAudio() }) {
-                                Icon(imageVector = Icons.Default.Share, contentDescription = null)
+                                Icon(imageVector = AppIcons.Share, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(stringResource(R.string.action_share_audio))
                             }
@@ -351,14 +344,14 @@ fun MeetingDetailsScreen(
                                         }
                                     }) {
                                         Icon(
-                                            imageVector = Icons.Default.Download,
+                                            imageVector = AppIcons.Download,
                                             contentDescription = stringResource(R.string.action_download_transcript_pdf)
                                         )
                                     }
                                     Box {
                                         IconButton(onClick = { showShareTranscriptMenu = true }) {
                                             Icon(
-                                                imageVector = Icons.Default.Share,
+                                                imageVector = AppIcons.Share,
                                                 contentDescription = stringResource(R.string.action_share_transcript)
                                             )
                                         }
@@ -384,7 +377,7 @@ fun MeetingDetailsScreen(
                                     }
                                     IconButton(onClick = { showDeleteTranscriptDialog = true }) {
                                         Icon(
-                                            imageVector = Icons.Default.Delete,
+                                            imageVector = AppIcons.Delete,
                                             contentDescription = stringResource(R.string.action_delete_transcript),
                                             tint = MaterialTheme.colorScheme.error
                                         )
@@ -433,14 +426,14 @@ fun MeetingDetailsScreen(
                                         }
                                     }) {
                                         Icon(
-                                            imageVector = Icons.Default.Download,
+                                            imageVector = AppIcons.Download,
                                             contentDescription = stringResource(R.string.action_download_protocol_pdf)
                                         )
                                     }
                                     Box {
                                         IconButton(onClick = { showShareProtocolMenu = true }) {
                                             Icon(
-                                                imageVector = Icons.Default.Share,
+                                                imageVector = AppIcons.Share,
                                                 contentDescription = stringResource(R.string.action_share_protocol)
                                             )
                                         }
@@ -466,7 +459,7 @@ fun MeetingDetailsScreen(
                                     }
                                     IconButton(onClick = { showDeleteProtocolDialog = true }) {
                                         Icon(
-                                            imageVector = Icons.Default.Delete,
+                                            imageVector = AppIcons.Delete,
                                             contentDescription = stringResource(R.string.action_delete_protocol),
                                             tint = MaterialTheme.colorScheme.error
                                         )

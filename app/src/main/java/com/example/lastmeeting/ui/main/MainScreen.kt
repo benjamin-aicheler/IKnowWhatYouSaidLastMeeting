@@ -23,14 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -67,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.lastmeeting.R
 import com.example.lastmeeting.data.db.MeetingEntity
+import com.example.lastmeeting.ui.theme.AppIcons
 import com.example.lastmeeting.util.DateTimeFormatters
 import java.time.Instant
 import java.time.LocalDate
@@ -135,7 +128,7 @@ fun MainScreen(
                 actions = {
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
-                            imageVector = Icons.Default.Settings,
+                            imageVector = AppIcons.Settings,
                             contentDescription = stringResource(R.string.title_settings)
                         )
                     }
@@ -156,7 +149,7 @@ fun MainScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (isRecording || isStopping) Icons.Default.Stop else Icons.Default.Mic,
+                        imageVector = if (isRecording || isStopping) AppIcons.Stop else AppIcons.Mic,
                         contentDescription = when {
                             isStopping -> stringResource(R.string.recording_stopping)
                             isRecording -> stringResource(R.string.action_stop_recording)
@@ -200,7 +193,7 @@ fun MainScreen(
                     shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
                     icon = {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.List,
+                            imageVector = AppIcons.List,
                             contentDescription = stringResource(R.string.view_list)
                         )
                     }
@@ -213,7 +206,7 @@ fun MainScreen(
                     shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                     icon = {
                         Icon(
-                            imageVector = Icons.Default.CalendarMonth,
+                            imageVector = AppIcons.CalendarMonth,
                             contentDescription = stringResource(R.string.view_calendar)
                         )
                     }
@@ -479,7 +472,7 @@ private fun MonthCalendarCard(
             ) {
                 IconButton(onClick = onPreviousMonth) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        imageVector = AppIcons.KeyboardArrowLeft,
                         contentDescription = null
                     )
                 }
@@ -490,7 +483,7 @@ private fun MonthCalendarCard(
                 )
                 IconButton(onClick = onNextMonth) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        imageVector = AppIcons.KeyboardArrowRight,
                         contentDescription = null
                     )
                 }
