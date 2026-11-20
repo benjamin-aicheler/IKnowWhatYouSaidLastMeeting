@@ -130,4 +130,10 @@
     <string name="action_copy_protocol">Protokoll kopieren</string>
     <string name="msg_copied_to_clipboard">In die Zwischenablage kopiert.</string>
     <string name="msg_audio_focus_denied">Audiowiedergabe konnte nicht gestartet werden, da eine andere App Audio verwendet.</string>
+
+    <!-- Accessibility -->
+    <string name="action_previous_month">Vorheriger Monat</string>
+    <string name="action_next_month">Nächster Monat</string>
+    <string name="action_show_api_key">API-Schlüssel anzeigen</string>
+    <string name="action_hide_api_key">API-Schlüssel verbergen</string>
 </resources>

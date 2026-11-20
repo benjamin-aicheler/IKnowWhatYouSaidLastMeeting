@@ -477,7 +477,7 @@ private fun MonthCalendarCard(
                 IconButton(onClick = onPreviousMonth) {
                     Icon(
                         imageVector = AppIcons.KeyboardArrowLeft,
-                        contentDescription = null
+                        contentDescription = stringResource(R.string.action_previous_month)
                     )
                 }
                 Text(
@@ -488,7 +488,7 @@ private fun MonthCalendarCard(
                 IconButton(onClick = onNextMonth) {
                     Icon(
                         imageVector = AppIcons.KeyboardArrowRight,
-                        contentDescription = null
+                        contentDescription = stringResource(R.string.action_next_month)
                     )
                 }
             }
