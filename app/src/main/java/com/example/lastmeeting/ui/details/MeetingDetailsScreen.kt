@@ -47,6 +47,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,15 +80,20 @@ fun MeetingDetailsScreen(
     val audioDurationMs by viewModel.audioDurationMs.collectAsState()
     val showTranscriptionConfirmation by viewModel.showTranscriptionConfirmation.collectAsState()
 
-    var showDeleteMeetingDialog by remember { mutableStateOf(false) }
-    var showDeleteTranscriptDialog by remember { mutableStateOf(false) }
-    var showDeleteProtocolDialog by remember { mutableStateOf(false) }
+    var showDeleteMeetingDialog by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
+    var showDeleteTranscriptDialog by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
+    var showDeleteProtocolDialog by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
 
     var showShareTranscriptMenu by remember { mutableStateOf(false) }
     var showShareProtocolMenu by remember { mutableStateOf(false) }
 
-    var isEditingTitle by remember { mutableStateOf(false) }
-    var titleText by remember(meeting?.title) { mutableStateOf(meeting?.title ?: "") }
+    var isEditingTitle by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
+    var titleText by rememberSaveable(viewModel.meetingId) { mutableStateOf(meeting?.title ?: "") }
+    LaunchedEffect(meeting?.title, isEditingTitle) {
+        if (!isEditingTitle && meeting != null) {
+            titleText = meeting?.title ?: ""
+        }
+    }
 
     // Publishing to the public Downloads folder needs WRITE_EXTERNAL_STORAGE on API 26-28.
     var pendingExport by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -198,14 +204,26 @@ fun MeetingDetailsScreen(
                                 singleLine = true
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = {
-                                    viewModel.updateTitle(titleText)
-                                    isEditingTitle = false
-                                },
-                                modifier = Modifier.align(Alignment.End)
+                            Row(
+                                modifier = Modifier.align(Alignment.End),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(stringResource(R.string.action_save))
+                                OutlinedButton(
+                                    onClick = {
+                                        titleText = currentMeeting.title
+                                        isEditingTitle = false
+                                    }
+                                ) {
+                                    Text(stringResource(R.string.action_cancel))
+                                }
+                                Button(
+                                    onClick = {
+                                        viewModel.updateTitle(titleText)
+                                        isEditingTitle = false
+                                    }
+                                ) {
+                                    Text(stringResource(R.string.action_save))
+                                }
                             }
                         } else {
                             Row(
@@ -219,7 +237,12 @@ fun MeetingDetailsScreen(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.weight(1f)
                                 )
-                                IconButton(onClick = { isEditingTitle = true }) {
+                                IconButton(
+                                    onClick = {
+                                        titleText = currentMeeting.title
+                                        isEditingTitle = true
+                                    }
+                                ) {
                                     Icon(
                                         imageVector = AppIcons.Edit,
                                         contentDescription = stringResource(R.string.action_edit_title)

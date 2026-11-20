@@ -45,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,7 +93,7 @@ fun MainScreen(
         }
     }
 
-    var selectedCalendarDate by remember { mutableStateOf<String?>(null) }
+    var selectedCalendarDate by rememberSaveable { mutableStateOf<String?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -346,13 +347,16 @@ fun CalendarViewComponent(
         meetings.groupBy { DateTimeFormatters.toIsoDateKey(it.startTime) }
     }
 
-    var currentMonth by remember {
+    var currentMonthIso by rememberSaveable {
         val initialMonth = meetings.firstOrNull()?.let {
             Instant.ofEpochMilli(it.startTime).atZone(ZoneId.systemDefault()).let { zdt ->
                 YearMonth.of(zdt.year, zdt.month)
             }
         } ?: YearMonth.now()
-        mutableStateOf(initialMonth)
+        mutableStateOf(initialMonth.toString())
+    }
+    val currentMonth = remember(currentMonthIso) {
+        runCatching { YearMonth.parse(currentMonthIso) }.getOrElse { YearMonth.now() }
     }
 
     val displayedDates = remember(groupedMeetings, selectedDate) {
@@ -366,8 +370,8 @@ fun CalendarViewComponent(
     Column(modifier = Modifier.fillMaxSize()) {
         MonthCalendarCard(
             currentMonth = currentMonth,
-            onPreviousMonth = { currentMonth = currentMonth.minusMonths(1) },
-            onNextMonth = { currentMonth = currentMonth.plusMonths(1) },
+            onPreviousMonth = { currentMonthIso = currentMonth.minusMonths(1).toString() },
+            onNextMonth = { currentMonthIso = currentMonth.plusMonths(1).toString() },
             datesWithMeetings = groupedMeetings.keys,
             selectedDate = selectedDate,
             onDateClick = { clickedDate ->
