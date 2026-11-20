@@ -105,9 +105,10 @@ To use AI transcription or protocolization:
 1. Open the app and tap the **Settings** icon (⚙️) in the top right.
 2. Enter your **OpenAI Compatible Base URL** (default: `https://api.openai.com/v1/`).
 3. Enter your **API Key**.
-4. Enter the **Transcription AI Model Name** (default: `gpt-4o-mini-transcribe`) and **Protocol AI Model Name** (default: `gpt-4o-mini`).
-5. (Optional) Customize the **Transcription** or **Protocol** system prompts.
-6. Tap **Save Settings**.
+4. Select the **Transcription Endpoint Mode** (`Automatic` default, `Audio Transcriptions`, or `Chat Audio`).
+5. Enter the **Transcription AI Model Name** (default: `gpt-4o-mini-transcribe`) and **Protocol AI Model Name** (default: `gpt-4o-mini`).
+6. (Optional) Customize the **Transcription** or **Protocol** system prompts.
+7. Tap **Save Settings**.
 
 ---
 

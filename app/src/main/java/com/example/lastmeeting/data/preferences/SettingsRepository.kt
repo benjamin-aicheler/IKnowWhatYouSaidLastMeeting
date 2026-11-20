@@ -13,9 +13,21 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "last_meeting_settings")
 
+enum class TranscriptionMode(val storageValue: String) {
+    AUTO("auto"),
+    AUDIO_TRANSCRIPTIONS("audio_transcriptions"),
+    CHAT_COMPLETIONS("chat_completions");
+
+    companion object {
+        fun fromStorage(value: String?): TranscriptionMode =
+            entries.firstOrNull { it.storageValue == value?.trim()?.lowercase() } ?: AUTO
+    }
+}
+
 data class ApiSettings(
     val baseUrl: String,
     val apiKey: String,
+    val transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO,
     val transcriptionModel: String,
     val protocolModel: String,
     val transcriptionPrompt: String,
@@ -32,6 +44,7 @@ class SettingsRepository(private val context: Context) {
         val KEY_PROTOCOL_MODEL = stringPreferencesKey("api_protocol_model")
         val KEY_TRANSCRIPTION_PROMPT = stringPreferencesKey("transcription_prompt")
         val KEY_PROTOCOL_PROMPT = stringPreferencesKey("protocol_prompt")
+        val KEY_TRANSCRIPTION_MODE = stringPreferencesKey("api_transcription_mode")
         val KEY_CONSENT_NOTICE_ACKNOWLEDGED = booleanPreferencesKey("consent_notice_acknowledged")
 
         const val DEFAULT_BASE_URL = "https://api.openai.com/v1/"
@@ -62,6 +75,7 @@ class SettingsRepository(private val context: Context) {
         ApiSettings(
             baseUrl = preferences[KEY_BASE_URL]?.takeIf { it.isNotBlank() } ?: DEFAULT_BASE_URL,
             apiKey = preferences[KEY_API_KEY] ?: "",
+            transcriptionMode = TranscriptionMode.fromStorage(preferences[KEY_TRANSCRIPTION_MODE]),
             transcriptionModel = resolveModel(
                 stored = preferences[KEY_TRANSCRIPTION_MODEL],
                 legacyStored = legacyModel,
@@ -82,6 +96,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun saveSettings(
         baseUrl: String,
         apiKey: String,
+        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO,
         transcriptionModel: String,
         protocolModel: String,
         transcriptionPrompt: String,
@@ -90,6 +105,7 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { preferences ->
             preferences[KEY_BASE_URL] = baseUrl.trim()
             preferences[KEY_API_KEY] = apiKey.trim()
+            preferences[KEY_TRANSCRIPTION_MODE] = transcriptionMode.storageValue
             preferences[KEY_TRANSCRIPTION_MODEL] = transcriptionModel.trim()
             preferences[KEY_PROTOCOL_MODEL] = protocolModel.trim()
             preferences.remove(KEY_MODEL)

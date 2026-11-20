@@ -98,6 +98,11 @@
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI Compatible API Base URL</string>
     <string name="label_api_key">API Key</string>
+    <string name="label_transcription_mode">Transcription Endpoint Mode</string>
+    <string name="transcription_mode_auto">Automatic (by host)</string>
+    <string name="transcription_mode_audio_transcriptions">Audio Transcriptions (/v1/audio/transcriptions)</string>
+    <string name="transcription_mode_chat_completions">Chat Audio (/v1/chat/completions)</string>
+    <string name="helper_transcription_mode">Automatic uses /v1/audio/transcriptions for OpenAI and /v1/chat/completions for other hosts. Select Audio Transcriptions for Whisper-compatible servers (e.g. Groq, LiteLLM, faster-whisper).</string>
     <string name="label_transcription_model">Transcription AI Model Name</string>
     <string name="label_protocol_model">Protocol AI Model Name</string>
     <string name="label_transcription_prompt">Transcription System Prompt</string>

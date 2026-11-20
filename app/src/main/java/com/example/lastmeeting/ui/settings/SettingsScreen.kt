@@ -13,7 +13,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -33,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.lastmeeting.R
+import com.example.lastmeeting.data.preferences.TranscriptionMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +50,8 @@ fun SettingsScreen(
 
     var baseUrl by remember(settings) { mutableStateOf(settings.baseUrl) }
     var apiKey by remember(settings) { mutableStateOf(settings.apiKey) }
+    var transcriptionMode by remember(settings) { mutableStateOf(settings.transcriptionMode) }
+    var showModeMenu by remember { mutableStateOf(false) }
     var transcriptionModel by remember(settings) { mutableStateOf(settings.transcriptionModel) }
     var protocolModel by remember(settings) { mutableStateOf(settings.protocolModel) }
     var transcriptionPrompt by remember(settings) { mutableStateOf(settings.transcriptionPrompt) }
@@ -96,6 +103,39 @@ fun SettingsScreen(
                 singleLine = true
             )
 
+            ExposedDropdownMenuBox(
+                expanded = showModeMenu,
+                onExpandedChange = { showModeMenu = !showModeMenu }
+            ) {
+                OutlinedTextField(
+                    value = stringResource(transcriptionModeLabelRes(transcriptionMode)),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(stringResource(R.string.label_transcription_mode)) },
+                    supportingText = { Text(stringResource(R.string.helper_transcription_mode)) },
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = showModeMenu)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                )
+                ExposedDropdownMenu(
+                    expanded = showModeMenu,
+                    onDismissRequest = { showModeMenu = false }
+                ) {
+                    TranscriptionMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(transcriptionModeLabelRes(mode))) },
+                            onClick = {
+                                transcriptionMode = mode
+                                showModeMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value = transcriptionModel,
                 onValueChange = { transcriptionModel = it },
@@ -137,6 +177,7 @@ fun SettingsScreen(
                     viewModel.saveSettings(
                         baseUrl = baseUrl,
                         apiKey = apiKey,
+                        transcriptionMode = transcriptionMode,
                         transcriptionModel = transcriptionModel,
                         protocolModel = protocolModel,
                         transcriptionPrompt = transcriptionPrompt,
@@ -149,4 +190,10 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+private fun transcriptionModeLabelRes(mode: TranscriptionMode): Int = when (mode) {
+    TranscriptionMode.AUTO -> R.string.transcription_mode_auto
+    TranscriptionMode.AUDIO_TRANSCRIPTIONS -> R.string.transcription_mode_audio_transcriptions
+    TranscriptionMode.CHAT_COMPLETIONS -> R.string.transcription_mode_chat_completions
 }
