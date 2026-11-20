@@ -84,9 +84,6 @@ fun MeetingDetailsScreen(
     var showDeleteTranscriptDialog by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
     var showDeleteProtocolDialog by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
 
-    var showShareTranscriptMenu by remember { mutableStateOf(false) }
-    var showShareProtocolMenu by remember { mutableStateOf(false) }
-
     var isEditingTitle by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
     var titleText by rememberSaveable(viewModel.meetingId) { mutableStateOf(meeting?.title ?: "") }
     LaunchedEffect(meeting?.title, isEditingTitle) {
@@ -396,207 +393,41 @@ fun MeetingDetailsScreen(
                     }
                 }
 
-                // Transcript Card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = transcriptLabel,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            if (currentMeeting.transcript != null) {
-                                Row {
-                                    IconButton(onClick = {
-                                        copyToClipboard(transcriptLabel, currentMeeting.transcript)
-                                    }) {
-                                        Icon(
-                                            imageVector = AppIcons.ContentCopy,
-                                            contentDescription = stringResource(R.string.action_copy_transcript)
-                                        )
-                                    }
-                                    IconButton(onClick = {
-                                        exportToDownloads {
-                                            viewModel.exportPdf(transcriptLabel, currentMeeting.transcript)
-                                        }
-                                    }) {
-                                        Icon(
-                                            imageVector = AppIcons.Download,
-                                            contentDescription = stringResource(R.string.action_download_transcript_pdf)
-                                        )
-                                    }
-                                    Box {
-                                        IconButton(onClick = { showShareTranscriptMenu = true }) {
-                                            Icon(
-                                                imageVector = AppIcons.Share,
-                                                contentDescription = stringResource(R.string.action_share_transcript)
-                                            )
-                                        }
-                                        DropdownMenu(
-                                            expanded = showShareTranscriptMenu,
-                                            onDismissRequest = { showShareTranscriptMenu = false }
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.action_share_as_text)) },
-                                                onClick = {
-                                                    showShareTranscriptMenu = false
-                                                    viewModel.shareText(currentMeeting.transcript)
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.action_share_as_pdf)) },
-                                                onClick = {
-                                                    showShareTranscriptMenu = false
-                                                    viewModel.sharePdf(transcriptLabel, currentMeeting.transcript)
-                                                }
-                                            )
-                                        }
-                                    }
-                                    IconButton(onClick = { showDeleteTranscriptDialog = true }) {
-                                        Icon(
-                                            imageVector = AppIcons.Delete,
-                                            contentDescription = stringResource(R.string.action_delete_transcript),
-                                            tint = MaterialTheme.colorScheme.error
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        val transcriptText = currentMeeting.transcript
-                        if (transcriptText != null) {
-                            SelectionContainer {
-                                Text(
-                                    text = transcriptText,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        } else {
-                            Text(
-                                text = stringResource(R.string.no_transcript),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        currentMeeting.transcriptError?.takeIf { it.isNotBlank() }?.let { errorMsg ->
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = stringResource(R.string.msg_ai_error, errorMsg),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
+                ResultCard(
+                    title = transcriptLabel,
+                    content = currentMeeting.transcript,
+                    emptyText = stringResource(R.string.no_transcript),
+                    errorText = currentMeeting.transcriptError,
+                    copyContentDescription = stringResource(R.string.action_copy_transcript),
+                    downloadContentDescription = stringResource(R.string.action_download_transcript_pdf),
+                    shareContentDescription = stringResource(R.string.action_share_transcript),
+                    deleteContentDescription = stringResource(R.string.action_delete_transcript),
+                    onCopy = { text -> copyToClipboard(transcriptLabel, text) },
+                    onDownloadPdf = { text ->
+                        exportToDownloads { viewModel.exportPdf(transcriptLabel, text) }
+                    },
+                    onShareText = { text -> viewModel.shareText(text) },
+                    onSharePdf = { text -> viewModel.sharePdf(transcriptLabel, text) },
+                    onDeleteClick = { showDeleteTranscriptDialog = true }
+                )
 
-                // Protocol Card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = protocolLabel,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            if (currentMeeting.protocol != null) {
-                                Row {
-                                    IconButton(onClick = {
-                                        copyToClipboard(protocolLabel, currentMeeting.protocol)
-                                    }) {
-                                        Icon(
-                                            imageVector = AppIcons.ContentCopy,
-                                            contentDescription = stringResource(R.string.action_copy_protocol)
-                                        )
-                                    }
-                                    IconButton(onClick = {
-                                        exportToDownloads {
-                                            viewModel.exportPdf(protocolLabel, currentMeeting.protocol)
-                                        }
-                                    }) {
-                                        Icon(
-                                            imageVector = AppIcons.Download,
-                                            contentDescription = stringResource(R.string.action_download_protocol_pdf)
-                                        )
-                                    }
-                                    Box {
-                                        IconButton(onClick = { showShareProtocolMenu = true }) {
-                                            Icon(
-                                                imageVector = AppIcons.Share,
-                                                contentDescription = stringResource(R.string.action_share_protocol)
-                                            )
-                                        }
-                                        DropdownMenu(
-                                            expanded = showShareProtocolMenu,
-                                            onDismissRequest = { showShareProtocolMenu = false }
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.action_share_as_text)) },
-                                                onClick = {
-                                                    showShareProtocolMenu = false
-                                                    viewModel.shareText(currentMeeting.protocol)
-                                                }
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.action_share_as_pdf)) },
-                                                onClick = {
-                                                    showShareProtocolMenu = false
-                                                    viewModel.sharePdf(protocolLabel, currentMeeting.protocol)
-                                                }
-                                            )
-                                        }
-                                    }
-                                    IconButton(onClick = { showDeleteProtocolDialog = true }) {
-                                        Icon(
-                                            imageVector = AppIcons.Delete,
-                                            contentDescription = stringResource(R.string.action_delete_protocol),
-                                            tint = MaterialTheme.colorScheme.error
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        val protocolText = currentMeeting.protocol
-                        if (protocolText != null) {
-                            SelectionContainer {
-                                Text(
-                                    text = protocolText,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        } else {
-                            Text(
-                                text = stringResource(R.string.no_protocol),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        currentMeeting.protocolError?.takeIf { it.isNotBlank() }?.let { errorMsg ->
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = stringResource(R.string.msg_ai_error, errorMsg),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                }
+                ResultCard(
+                    title = protocolLabel,
+                    content = currentMeeting.protocol,
+                    emptyText = stringResource(R.string.no_protocol),
+                    errorText = currentMeeting.protocolError,
+                    copyContentDescription = stringResource(R.string.action_copy_protocol),
+                    downloadContentDescription = stringResource(R.string.action_download_protocol_pdf),
+                    shareContentDescription = stringResource(R.string.action_share_protocol),
+                    deleteContentDescription = stringResource(R.string.action_delete_protocol),
+                    onCopy = { text -> copyToClipboard(protocolLabel, text) },
+                    onDownloadPdf = { text ->
+                        exportToDownloads { viewModel.exportPdf(protocolLabel, text) }
+                    },
+                    onShareText = { text -> viewModel.shareText(text) },
+                    onSharePdf = { text -> viewModel.sharePdf(protocolLabel, text) },
+                    onDeleteClick = { showDeleteProtocolDialog = true }
+                )
             }
         }
     }
@@ -654,6 +485,118 @@ fun MeetingDetailsScreen(
             },
             onDismiss = { showDeleteProtocolDialog = false }
         )
+    }
+}
+
+@Composable
+private fun ResultCard(
+    title: String,
+    content: String?,
+    emptyText: String,
+    errorText: String?,
+    copyContentDescription: String,
+    downloadContentDescription: String,
+    shareContentDescription: String,
+    deleteContentDescription: String,
+    onCopy: (String) -> Unit,
+    onDownloadPdf: (String) -> Unit,
+    onShareText: (String) -> Unit,
+    onSharePdf: (String) -> Unit,
+    onDeleteClick: () -> Unit
+) {
+    var showShareMenu by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                if (content != null) {
+                    Row {
+                        IconButton(onClick = { onCopy(content) }) {
+                            Icon(
+                                imageVector = AppIcons.ContentCopy,
+                                contentDescription = copyContentDescription
+                            )
+                        }
+                        IconButton(onClick = { onDownloadPdf(content) }) {
+                            Icon(
+                                imageVector = AppIcons.Download,
+                                contentDescription = downloadContentDescription
+                            )
+                        }
+                        Box {
+                            IconButton(onClick = { showShareMenu = true }) {
+                                Icon(
+                                    imageVector = AppIcons.Share,
+                                    contentDescription = shareContentDescription
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showShareMenu,
+                                onDismissRequest = { showShareMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_share_as_text)) },
+                                    onClick = {
+                                        showShareMenu = false
+                                        onShareText(content)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_share_as_pdf)) },
+                                    onClick = {
+                                        showShareMenu = false
+                                        onSharePdf(content)
+                                    }
+                                )
+                            }
+                        }
+                        IconButton(onClick = onDeleteClick) {
+                            Icon(
+                                imageVector = AppIcons.Delete,
+                                contentDescription = deleteContentDescription,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (content != null) {
+                SelectionContainer {
+                    Text(
+                        text = content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            } else {
+                Text(
+                    text = emptyText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            errorText?.takeIf { it.isNotBlank() }?.let { errorMsg ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.msg_ai_error, errorMsg),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
     }
 }
 
