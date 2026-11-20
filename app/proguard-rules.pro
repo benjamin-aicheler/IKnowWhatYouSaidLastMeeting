@@ -4,9 +4,9 @@
 # keep app-defined serialization DTOs intact under R8 minification.
 
 -keepattributes *Annotation*
--keepclassmembers class com.example.lastmeeting.data.api.** {
+-keepclassmembers class io.github.benjamin_aicheler.lastmeeting.data.api.** {
     *** Companion;
 }
--keepclasseswithmembers class com.example.lastmeeting.data.api.**$Companion {
+-keepclasseswithmembers class io.github.benjamin_aicheler.lastmeeting.data.api.**$Companion {
     kotlinx.serialization.KSerializer serializer(...);
 }
