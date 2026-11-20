@@ -74,7 +74,7 @@ class MeetingGenerationPersistenceTest {
             MeetingDatabase.getDatabase(context).useDatabase { database ->
                 val dao = database.meetingDao()
                 assertEquals(original, dao.getMeetingByIdDirect(original.id))
-                assertEquals(3, database.openHelper.readableDatabase.version)
+                assertEquals(4, database.openHelper.readableDatabase.version)
                 assertFalse(dao.getMeetingByIdDirect(original.id)!!.isDamaged)
                 assertEquals(0L, dao.deleteTranscript(original.id))
                 assertEquals(0L, dao.deleteProtocol(original.id))
@@ -167,19 +167,69 @@ class MeetingGenerationPersistenceTest {
 
         open(context, name).useDatabase { database ->
             val dao = database.meetingDao()
-            assertEquals(3, database.openHelper.readableDatabase.version)
+            assertEquals(4, database.openHelper.readableDatabase.version)
             val migrated = dao.getMeetingByIdDirect(original.id)!!
             assertEquals(original, migrated)
             assertFalse(migrated.isDamaged)
+            assertNull(migrated.transcriptError)
+            assertNull(migrated.protocolError)
 
             dao.finishMeeting(original.id, endTime = 5_000L, isDamaged = true)
             assertTrue(dao.getMeetingByIdDirect(original.id)!!.isDamaged)
         }
     }
 
+    @Test
+    fun migration3To4AddsNullableTaskErrorColumns() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val name = "migration-3-4.db"
+        val original = meeting().copy(id = 9L)
+        context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).use { database ->
+            database.execSQL("""
+                CREATE TABLE meetings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    title TEXT NOT NULL, startTime INTEGER NOT NULL, endTime INTEGER NOT NULL,
+                    audioFilePath TEXT NOT NULL, transcript TEXT, protocol TEXT, createdAt INTEGER NOT NULL,
+                    transcriptGeneration INTEGER NOT NULL DEFAULT 0,
+                    protocolGeneration INTEGER NOT NULL DEFAULT 0,
+                    isDamaged INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+            database.execSQL(
+                "INSERT INTO meetings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                arrayOf<Any?>(original.id, original.title, original.startTime, original.endTime,
+                    original.audioFilePath, original.transcript, original.protocol, original.createdAt, 0L, 0L, 0)
+            )
+            database.version = 3
+        }
+
+        open(context, name).useDatabase { database ->
+            val dao = database.meetingDao()
+            assertEquals(4, database.openHelper.readableDatabase.version)
+            val migrated = dao.getMeetingByIdDirect(original.id)!!
+            assertEquals(original, migrated)
+            assertNull(migrated.transcriptError)
+            assertNull(migrated.protocolError)
+
+            assertEquals(1, dao.updateTranscriptError(original.id, "Upload failed", 0L))
+            assertEquals(1, dao.updateProtocolError(original.id, "Timeout", 0L))
+            val errored = dao.getMeetingByIdDirect(original.id)!!
+            assertEquals("Upload failed", errored.transcriptError)
+            assertEquals("Timeout", errored.protocolError)
+
+            assertEquals(1, dao.updateTranscript(original.id, "New transcript", 0L))
+            val updatedTranscript = dao.getMeetingByIdDirect(original.id)!!
+            assertNull(updatedTranscript.transcriptError)
+            assertNull(updatedTranscript.protocolError)
+
+            assertEquals(1, dao.updateProtocol(original.id, "New protocol", 1L))
+            assertNull(dao.getMeetingByIdDirect(original.id)!!.protocolError)
+        }
+    }
+
     private fun open(context: Context, name: String): MeetingDatabase =
         Room.databaseBuilder(context, MeetingDatabase::class.java, name)
-            .addMigrations(MeetingDatabase.MIGRATION_1_2, MeetingDatabase.MIGRATION_2_3).build()
+            .addMigrations(MeetingDatabase.MIGRATION_1_2, MeetingDatabase.MIGRATION_2_3, MeetingDatabase.MIGRATION_3_4).build()
 
     private inline fun <T> MeetingDatabase.useDatabase(block: (MeetingDatabase) -> T): T =
         try { block(this) } finally { close() }

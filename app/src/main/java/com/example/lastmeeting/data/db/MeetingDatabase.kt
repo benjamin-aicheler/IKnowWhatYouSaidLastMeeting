@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [MeetingEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class MeetingDatabase : RoomDatabase() {
@@ -30,6 +30,13 @@ abstract class MeetingDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE meetings ADD COLUMN transcriptError TEXT")
+                db.execSQL("ALTER TABLE meetings ADD COLUMN protocolError TEXT")
+            }
+        }
+
         @Volatile
         private var INSTANCE: MeetingDatabase? = null
 
@@ -39,7 +46,7 @@ abstract class MeetingDatabase : RoomDatabase() {
                     context.applicationContext,
                     MeetingDatabase::class.java,
                     "last_meeting_db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
                 INSTANCE = instance
                 instance
             }

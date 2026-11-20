@@ -38,18 +38,26 @@ interface MeetingDao {
         UPDATE meetings SET
             protocol = CASE WHEN transcript IS NOT :transcript THEN NULL ELSE protocol END,
             protocolGeneration = protocolGeneration + CASE WHEN transcript IS NOT :transcript THEN 1 ELSE 0 END,
-            transcript = :transcript
+            protocolError = CASE WHEN transcript IS NOT :transcript THEN NULL ELSE protocolError END,
+            transcript = :transcript,
+            transcriptError = NULL
         WHERE id = :id AND transcriptGeneration = :generation
     """)
     suspend fun updateTranscript(id: Long, transcript: String, generation: Long): Int
 
-    @Query("UPDATE meetings SET protocol = :protocol WHERE id = :id AND protocolGeneration = :generation")
+    @Query("UPDATE meetings SET protocol = :protocol, protocolError = NULL WHERE id = :id AND protocolGeneration = :generation")
     suspend fun updateProtocol(id: Long, protocol: String, generation: Long): Int
 
-    @Query("UPDATE meetings SET transcript = NULL, transcriptGeneration = transcriptGeneration + 1 WHERE id = :id")
+    @Query("UPDATE meetings SET transcriptError = :error WHERE id = :id AND transcriptGeneration = :generation")
+    suspend fun updateTranscriptError(id: Long, error: String?, generation: Long): Int
+
+    @Query("UPDATE meetings SET protocolError = :error WHERE id = :id AND protocolGeneration = :generation")
+    suspend fun updateProtocolError(id: Long, error: String?, generation: Long): Int
+
+    @Query("UPDATE meetings SET transcript = NULL, transcriptError = NULL, transcriptGeneration = transcriptGeneration + 1 WHERE id = :id")
     suspend fun clearTranscript(id: Long)
 
-    @Query("UPDATE meetings SET protocol = NULL, protocolGeneration = protocolGeneration + 1 WHERE id = :id")
+    @Query("UPDATE meetings SET protocol = NULL, protocolError = NULL, protocolGeneration = protocolGeneration + 1 WHERE id = :id")
     suspend fun clearProtocol(id: Long)
 
     @Transaction

@@ -308,6 +308,29 @@ class MeetingRepository(
         }
     }
 
+    suspend fun clearTaskError(id: Long, isTranscriptTask: Boolean, generation: Long) {
+        if (isTranscriptTask) {
+            meetingDao.updateTranscriptError(id, null, generation)
+        } else {
+            meetingDao.updateProtocolError(id, null, generation)
+        }
+    }
+
+    suspend fun recordTaskError(
+        id: Long,
+        isTranscriptTask: Boolean,
+        generation: Long,
+        errorMessage: String
+    ): Boolean {
+        val bounded = errorMessage.trim().ifEmpty { "Unknown error" }.take(500)
+        val updated = if (isTranscriptTask) {
+            meetingDao.updateTranscriptError(id, bounded, generation)
+        } else {
+            meetingDao.updateProtocolError(id, bounded, generation)
+        }
+        return updated > 0
+    }
+
     suspend fun deleteTranscript(id: Long): Long? = meetingDao.deleteTranscript(id)
 
     suspend fun deleteProtocol(id: Long): Long? = meetingDao.deleteProtocol(id)
