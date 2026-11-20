@@ -124,4 +124,9 @@
     <string name="consent_notice_title">Datenschutz &amp; Einwilligung zur Aufnahme</string>
     <string name="consent_notice_message">Aufnahmen, Transkripte und Protokolle werden lokal auf Ihrem Gerät gespeichert. Wenn Sie eine KI-Transkription oder Protokollerstellung starten, wird die Audioaufnahme bzw. das Transkript an den in den Einstellungen konfigurierten API-Endpunkt gesendet.\n\nInformieren Sie stets alle Teilnehmenden und holen Sie deren Einwilligung ein, bevor Sie eine Sitzung aufnehmen. Die gesetzlichen Vorgaben variieren je nach Land.</string>
     <string name="consent_notice_acknowledge">Verstanden</string>
+
+    <!-- Clipboard -->
+    <string name="action_copy_transcript">Transkript kopieren</string>
+    <string name="action_copy_protocol">Protokoll kopieren</string>
+    <string name="msg_copied_to_clipboard">In die Zwischenablage kopiert.</string>
 </resources>

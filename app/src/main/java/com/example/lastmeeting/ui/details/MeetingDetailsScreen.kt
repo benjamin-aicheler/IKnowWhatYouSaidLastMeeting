@@ -1,6 +1,8 @@
 package com.example.lastmeeting.ui.details
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
@@ -34,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -70,6 +74,8 @@ fun MeetingDetailsScreen(
     val isTranscribing by viewModel.isTranscribing.collectAsState()
     val isProtocolizing by viewModel.isProtocolizing.collectAsState()
     val isPlayingAudio by viewModel.isPlayingAudio.collectAsState()
+    val audioPositionMs by viewModel.audioPositionMs.collectAsState()
+    val audioDurationMs by viewModel.audioDurationMs.collectAsState()
     val showTranscriptionConfirmation by viewModel.showTranscriptionConfirmation.collectAsState()
 
     var showDeleteMeetingDialog by remember { mutableStateOf(false) }
@@ -108,6 +114,12 @@ fun MeetingDetailsScreen(
         } else {
             action()
         }
+    }
+
+    fun copyToClipboard(label: String, text: String) {
+        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        Toast.makeText(context, R.string.msg_copied_to_clipboard, Toast.LENGTH_SHORT).show()
     }
 
     LaunchedEffect(resources) {
@@ -271,6 +283,43 @@ fun MeetingDetailsScreen(
                                 Text(stringResource(R.string.action_share_audio))
                             }
                         }
+                        if (audioDurationMs > 0) {
+                            var isDraggingSlider by remember(currentMeeting.id) { mutableStateOf(false) }
+                            var dragPositionMs by remember(currentMeeting.id) { mutableStateOf(0f) }
+                            val displayedPositionMs = if (isDraggingSlider) {
+                                dragPositionMs.toInt()
+                            } else {
+                                audioPositionMs.coerceIn(0, audioDurationMs)
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Slider(
+                                value = displayedPositionMs.toFloat(),
+                                onValueChange = { newValue ->
+                                    isDraggingSlider = true
+                                    dragPositionMs = newValue
+                                },
+                                onValueChangeFinished = {
+                                    val target = dragPositionMs.toInt()
+                                    isDraggingSlider = false
+                                    viewModel.seekAudioTo(target)
+                                },
+                                valueRange = 0f..audioDurationMs.toFloat(),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            val locale = LocalLocale.current.platformLocale
+                            val elapsedFormatted = formatMillis(displayedPositionMs, locale)
+                            val totalFormatted = formatMillis(audioDurationMs, locale)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Text(
+                                    text = "$elapsedFormatted / $totalFormatted",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         if (currentMeeting.isDamaged) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -339,6 +388,14 @@ fun MeetingDetailsScreen(
                             if (currentMeeting.transcript != null) {
                                 Row {
                                     IconButton(onClick = {
+                                        copyToClipboard(transcriptLabel, currentMeeting.transcript)
+                                    }) {
+                                        Icon(
+                                            imageVector = AppIcons.ContentCopy,
+                                            contentDescription = stringResource(R.string.action_copy_transcript)
+                                        )
+                                    }
+                                    IconButton(onClick = {
                                         exportToDownloads {
                                             viewModel.exportPdf(transcriptLabel, currentMeeting.transcript)
                                         }
@@ -386,11 +443,22 @@ fun MeetingDetailsScreen(
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = currentMeeting.transcript ?: stringResource(R.string.no_transcript),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (currentMeeting.transcript != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        val transcriptText = currentMeeting.transcript
+                        if (transcriptText != null) {
+                            SelectionContainer {
+                                Text(
+                                    text = transcriptText,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = stringResource(R.string.no_transcript),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         currentMeeting.transcriptError?.takeIf { it.isNotBlank() }?.let { errorMsg ->
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -420,6 +488,14 @@ fun MeetingDetailsScreen(
                             )
                             if (currentMeeting.protocol != null) {
                                 Row {
+                                    IconButton(onClick = {
+                                        copyToClipboard(protocolLabel, currentMeeting.protocol)
+                                    }) {
+                                        Icon(
+                                            imageVector = AppIcons.ContentCopy,
+                                            contentDescription = stringResource(R.string.action_copy_protocol)
+                                        )
+                                    }
                                     IconButton(onClick = {
                                         exportToDownloads {
                                             viewModel.exportPdf(protocolLabel, currentMeeting.protocol)
@@ -468,11 +544,22 @@ fun MeetingDetailsScreen(
                             }
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = currentMeeting.protocol ?: stringResource(R.string.no_protocol),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (currentMeeting.protocol != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        val protocolText = currentMeeting.protocol
+                        if (protocolText != null) {
+                            SelectionContainer {
+                                Text(
+                                    text = protocolText,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = stringResource(R.string.no_protocol),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         currentMeeting.protocolError?.takeIf { it.isNotBlank() }?.let { errorMsg ->
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -541,4 +628,9 @@ fun MeetingDetailsScreen(
             onDismiss = { showDeleteProtocolDialog = false }
         )
     }
+}
+
+private fun formatMillis(millis: Int, locale: java.util.Locale): String {
+    val totalSeconds = (millis / 1000).coerceAtLeast(0)
+    return String.format(locale, "%02d:%02d", totalSeconds / 60, totalSeconds % 60)
 }
