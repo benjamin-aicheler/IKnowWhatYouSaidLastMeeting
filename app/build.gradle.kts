@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.lastmeeting"
+    namespace = "io.github.benjamin_aicheler.lastmeeting"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.lastmeeting"
+        applicationId = "io.github.benjamin_aicheler.lastmeeting"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
