@@ -9,6 +9,7 @@ import com.example.lastmeeting.data.db.MeetingEntity
 import com.example.lastmeeting.data.preferences.SettingsRepository
 import com.example.lastmeeting.util.AndroidAudioSegmenter
 import com.example.lastmeeting.util.AudioSegmenter
+import com.example.lastmeeting.util.DateTimeFormatters
 import com.example.lastmeeting.util.PdfExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -188,7 +189,7 @@ class MeetingRepository(
     }
 
     private fun defaultTitle(startTime: Long): String {
-        val dateString = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(startTime))
+        val dateString = DateTimeFormatters.formatLocalizedDateTime(startTime, Locale.getDefault())
         return context.getString(R.string.default_meeting_title, dateString)
     }
 

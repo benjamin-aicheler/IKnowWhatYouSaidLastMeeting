@@ -63,8 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.lastmeeting.R
 import com.example.lastmeeting.ui.components.DeleteConfirmationDialog
-import java.text.SimpleDateFormat
-import java.util.Date
+import com.example.lastmeeting.util.DateTimeFormatters
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -225,7 +224,9 @@ fun MeetingDetailsScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
                         val locale = LocalLocale.current.platformLocale
-                        val dateFormat = remember(locale) { SimpleDateFormat("yyyy-MM-dd HH:mm", locale) }
+                        val formattedDate = remember(currentMeeting.startTime, locale) {
+                            DateTimeFormatters.formatLocalizedDateTime(currentMeeting.startTime, locale)
+                        }
                         val durationSeconds = ((currentMeeting.endTime - currentMeeting.startTime) / 1000).coerceAtLeast(0L)
                         val durationFormatted = String.format(
                             locale,
@@ -234,7 +235,7 @@ fun MeetingDetailsScreen(
                             durationSeconds % 60
                         )
                         Text(
-                            text = "${stringResource(R.string.label_date)}: ${dateFormat.format(Date(currentMeeting.startTime))} • ${stringResource(R.string.label_duration)}: $durationFormatted",
+                            text = "${stringResource(R.string.label_date)}: $formattedDate • ${stringResource(R.string.label_duration)}: $durationFormatted",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
