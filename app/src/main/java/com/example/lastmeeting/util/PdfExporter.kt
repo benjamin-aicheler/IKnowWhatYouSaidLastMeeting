@@ -8,9 +8,13 @@ import android.graphics.pdf.PdfDocument
 import com.example.lastmeeting.R
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.OutputStream
 
 object PdfExporter {
+
+    internal const val SHARED_PDF_DIR_NAME = "shared_pdfs"
+    internal const val SHARED_PDF_RETENTION_MS = 24L * 60L * 60L * 1000L
 
     fun exportToPdf(
         context: Context,
@@ -30,6 +34,7 @@ object PdfExporter {
         textContent: String
     ): Result<File> {
         return try {
+            pruneExpiredSharedPdfs(context.cacheDir)
             val outFile = writeCachePdf(context.cacheDir, title, typeLabel) { stream ->
                 writePdfDocument(title, typeLabel, textContent, stream)
             }
@@ -45,9 +50,13 @@ object PdfExporter {
         typeLabel: String,
         writeDocument: (OutputStream) -> Unit
     ): File {
+        val sharedDir = File(cacheDir, SHARED_PDF_DIR_NAME)
+        if (!sharedDir.exists() && !sharedDir.mkdirs() && !sharedDir.isDirectory) {
+            throw IOException("Could not create shared PDF directory: ${sharedDir.absolutePath}")
+        }
         val prefix = ExportFileNames.pdf(title, typeLabel).removeSuffix(".pdf") + "_"
         // Reserve a new path for every share: existing URI grants must keep their contents.
-        val outFile = File.createTempFile(prefix, ".pdf", cacheDir)
+        val outFile = File.createTempFile(prefix, ".pdf", sharedDir)
         try {
             FileOutputStream(outFile).use(writeDocument)
             return outFile
@@ -55,6 +64,23 @@ object PdfExporter {
             outFile.delete()
             throw e
         }
+    }
+
+    internal fun pruneExpiredSharedPdfs(
+        cacheDir: File,
+        nowMillis: Long = System.currentTimeMillis(),
+        maxAgeMillis: Long = SHARED_PDF_RETENTION_MS
+    ): Int {
+        val sharedDir = File(cacheDir, SHARED_PDF_DIR_NAME)
+        if (!sharedDir.isDirectory) return 0
+        val cutoffMillis = nowMillis - maxAgeMillis
+        var deletedCount = 0
+        sharedDir.listFiles().orEmpty().forEach { file ->
+            if (file.isFile && file.lastModified() < cutoffMillis && file.delete()) {
+                deletedCount++
+            }
+        }
+        return deletedCount
     }
 
     fun exportAudioToDownloads(

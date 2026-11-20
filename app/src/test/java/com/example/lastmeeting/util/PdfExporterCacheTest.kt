@@ -2,6 +2,7 @@ package com.example.lastmeeting.util
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
@@ -9,6 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 import java.io.IOException
 import java.io.OutputStream
 
@@ -31,7 +33,7 @@ class PdfExporterCacheTest {
         assertNotEquals(first, second)
         assertArrayEquals(firstContents, first.readBytes())
         assertArrayEquals(secondContents, second.readBytes())
-        assertEquals(temporaryFolder.root, first.parentFile)
+        assertEquals(File(temporaryFolder.root, PdfExporter.SHARED_PDF_DIR_NAME), first.parentFile)
         assertTrue(first.name.startsWith("Team_Sync_transcript_"))
         assertTrue(first.name.endsWith(".pdf"))
     }
@@ -81,8 +83,36 @@ class PdfExporterCacheTest {
         }
 
         assertSame(failure, thrown)
-        assertArrayEquals(arrayOf(existing), temporaryFolder.root.listFiles())
+        val sharedDir = File(temporaryFolder.root, PdfExporter.SHARED_PDF_DIR_NAME)
+        assertArrayEquals(arrayOf(existing), sharedDir.listFiles())
         assertEquals("Already shared", existing.readText())
         assertThrows(IOException::class.java) { failedStream.write(0) }
+    }
+
+    @Test
+    fun pruneExpiredSharedPdfsDeletesOnlyExpiredFilesInsideSharedPdfDirectory() {
+        assertEquals(0, PdfExporter.pruneExpiredSharedPdfs(temporaryFolder.root, nowMillis = 100_000L))
+
+        val expired = PdfExporter.writeCachePdf(temporaryFolder.root, "Expired", "Transcript") {
+            it.write(1)
+        }
+        val fresh = PdfExporter.writeCachePdf(temporaryFolder.root, "Fresh", "Transcript") {
+            it.write(2)
+        }
+        val unrelatedCacheFile = File(temporaryFolder.root, "other_cache.tmp").apply {
+            writeText("keep me")
+        }
+
+        val now = 200_000_000L
+        assertTrue(expired.setLastModified(now - PdfExporter.SHARED_PDF_RETENTION_MS - 1_000L))
+        assertTrue(fresh.setLastModified(now - PdfExporter.SHARED_PDF_RETENTION_MS + 1_000L))
+        assertTrue(unrelatedCacheFile.setLastModified(1L))
+
+        val deleted = PdfExporter.pruneExpiredSharedPdfs(temporaryFolder.root, nowMillis = now)
+
+        assertEquals(1, deleted)
+        assertFalse(expired.exists())
+        assertTrue(fresh.exists())
+        assertTrue(unrelatedCacheFile.exists())
     }
 }
