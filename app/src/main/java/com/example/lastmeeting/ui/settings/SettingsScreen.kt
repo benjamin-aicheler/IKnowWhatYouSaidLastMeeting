@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
@@ -34,7 +35,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.lastmeeting.R
 import com.example.lastmeeting.data.preferences.TranscriptionMode
@@ -51,6 +54,7 @@ fun SettingsScreen(
 
     var baseUrl by remember(settings) { mutableStateOf(settings.baseUrl) }
     var apiKey by remember(settings) { mutableStateOf(settings.apiKey) }
+    var showApiKey by remember { mutableStateOf(false) }
     var transcriptionMode by remember(settings) { mutableStateOf(settings.transcriptionMode) }
     var showModeMenu by remember { mutableStateOf(false) }
     var transcriptionModel by remember(settings) { mutableStateOf(settings.transcriptionModel) }
@@ -101,7 +105,21 @@ fun SettingsScreen(
                 value = apiKey,
                 onValueChange = { apiKey = it },
                 label = { Text(stringResource(R.string.label_api_key)) },
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    autoCorrectEnabled = false
+                ),
+                trailingIcon = {
+                    IconButton(onClick = { showApiKey = !showApiKey }) {
+                        Icon(
+                            imageVector = if (showApiKey) AppIcons.VisibilityOff else AppIcons.Visibility,
+                            contentDescription = stringResource(
+                                if (showApiKey) R.string.action_hide_api_key else R.string.action_show_api_key
+                            )
+                        )
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
