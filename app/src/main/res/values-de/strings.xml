@@ -136,4 +136,16 @@
     <string name="action_next_month">Nächster Monat</string>
     <string name="action_show_api_key">API-Schlüssel anzeigen</string>
     <string name="action_hide_api_key">API-Schlüssel verbergen</string>
+
+    <!-- Base URL Validation & Connection Test -->
+    <string name="error_invalid_base_url">Geben Sie eine gültige http://- oder https://-Basis-URL ein.</string>
+    <string name="error_base_url_credentials_or_query">Die Basis-URL darf keine Zugangsdaten, Abfrageparameter oder Fragmente enthalten.</string>
+    <string name="warning_plain_http_base_url">Unverschlüsseltes HTTP ist unsicher und wird von Android standardmäßig blockiert.</string>
+    <string name="action_test_connection">Verbindung testen</string>
+    <string name="msg_testing_connection">Verbindung wird getestet…</string>
+    <string name="msg_connection_test_success">Verbindung erfolgreich (/models-Endpunkt erreichbar).</string>
+    <string name="msg_connection_test_failed">Verbindungstest fehlgeschlagen: %1$s</string>
+    <string name="confirm_discard_settings_title">Ungespeicherte Änderungen</string>
+    <string name="confirm_discard_settings_message">Sie haben ungespeicherte Änderungen. Verwerfen und Einstellungen verlassen?</string>
+    <string name="action_discard">Verwerfen</string>
 </resources>

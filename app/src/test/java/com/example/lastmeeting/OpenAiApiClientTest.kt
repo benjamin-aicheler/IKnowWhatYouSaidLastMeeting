@@ -1,6 +1,8 @@
 package com.example.lastmeeting
 
+import com.example.lastmeeting.data.api.ApiHttpException
 import com.example.lastmeeting.data.api.AudioFileTooLargeException
+import com.example.lastmeeting.data.api.BaseUrlValidationResult
 import com.example.lastmeeting.data.api.OpenAiApiClient
 import com.example.lastmeeting.data.preferences.SettingsRepository
 import com.example.lastmeeting.data.preferences.TranscriptionMode
@@ -437,5 +439,76 @@ class OpenAiApiClientTest {
         assertEquals(TranscriptionMode.AUTO, TranscriptionMode.fromStorage("unknown_mode"))
         assertEquals(TranscriptionMode.AUDIO_TRANSCRIPTIONS, TranscriptionMode.fromStorage("audio_transcriptions"))
         assertEquals(TranscriptionMode.CHAT_COMPLETIONS, TranscriptionMode.fromStorage("CHAT_COMPLETIONS"))
+    }
+
+    @Test
+    fun testValidateBaseUrlHandlesValidHttpHttpsAndRejectsInvalidUrls() {
+        val defaultValid = OpenAiApiClient.validateBaseUrl("   ")
+        assertEquals(
+            BaseUrlValidationResult.Valid(SettingsRepository.DEFAULT_BASE_URL, isPlainHttp = false),
+            defaultValid
+        )
+
+        val customHttps = OpenAiApiClient.validateBaseUrl("https://api.groq.com/openai/v1")
+        assertEquals(
+            BaseUrlValidationResult.Valid("https://api.groq.com/openai/v1/", isPlainHttp = false),
+            customHttps
+        )
+
+        val localHttp = OpenAiApiClient.validateBaseUrl("http://localhost:8080/v1")
+        assertEquals(
+            BaseUrlValidationResult.Valid("http://localhost:8080/v1/", isPlainHttp = true),
+            localHttp
+        )
+
+        assertEquals(BaseUrlValidationResult.InvalidSchemeOrHost, OpenAiApiClient.validateBaseUrl("ftp://example.com/v1"))
+        assertEquals(BaseUrlValidationResult.InvalidSchemeOrHost, OpenAiApiClient.validateBaseUrl("not-a-url"))
+        assertEquals(
+            BaseUrlValidationResult.ContainsCredentialsOrQuery,
+            OpenAiApiClient.validateBaseUrl("https://user:pass@example.com/v1")
+        )
+        assertEquals(
+            BaseUrlValidationResult.ContainsCredentialsOrQuery,
+            OpenAiApiClient.validateBaseUrl("https://example.com/v1?key=123")
+        )
+        assertEquals(
+            BaseUrlValidationResult.ContainsCredentialsOrQuery,
+            OpenAiApiClient.validateBaseUrl("https://example.com/v1#frag")
+        )
+    }
+
+    @Test
+    fun testConnectionProbesModelsEndpointAndReportsAuthFailure() = runBlocking {
+        var capturedRequest: Request? = null
+        var responseCode = 200
+        var responseBody = """{"data":[]}"""
+        val httpClient = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                capturedRequest = chain.request()
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(responseCode)
+                    .message(if (responseCode == 200) "OK" else "Unauthorized")
+                    .body(responseBody.toResponseBody("application/json".toMediaType()))
+                    .build()
+            })
+            .build()
+
+        val client = OpenAiApiClient(httpClient = httpClient)
+        val okResult = client.testConnection("https://api.example.com/v1", "sk-valid")
+        assertTrue(okResult.isSuccess)
+        assertEquals("GET", capturedRequest?.method)
+        assertEquals("https://api.example.com/v1/models", capturedRequest?.url.toString())
+        assertEquals("Bearer sk-valid", capturedRequest?.header("Authorization"))
+
+        responseCode = 401
+        responseBody = """{"error":{"message":"Invalid API key"}}"""
+        val failResult = client.testConnection("https://api.example.com/v1/", "sk-bad")
+        assertTrue(failResult.isFailure)
+        val exception = failResult.exceptionOrNull() as? ApiHttpException
+        assertNotNull(exception)
+        assertEquals(401, exception!!.code)
+        assertEquals("Invalid API key", exception.message)
     }
 }

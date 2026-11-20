@@ -78,6 +78,12 @@ internal class AudioFileTooLargeException(
     message: String
 ) : IllegalArgumentException(message)
 
+sealed class BaseUrlValidationResult {
+    data class Valid(val normalizedUrl: String, val isPlainHttp: Boolean) : BaseUrlValidationResult()
+    data object InvalidSchemeOrHost : BaseUrlValidationResult()
+    data object ContainsCredentialsOrQuery : BaseUrlValidationResult()
+}
+
 class OpenAiApiClient(
     connectTimeoutSeconds: Long = 60,
     readTimeoutSeconds: Long = 300,
@@ -87,6 +93,30 @@ class OpenAiApiClient(
 
     companion object {
         const val MAX_AUDIO_UPLOAD_BYTES: Long = 25L * 1024L * 1024L
+
+        internal fun formatBaseUrl(baseUrl: String): String =
+            baseUrl.trim().ifBlank { SettingsRepository.DEFAULT_BASE_URL }.let {
+                if (it.endsWith("/")) it else "$it/"
+            }
+
+        internal fun validateBaseUrl(rawUrl: String): BaseUrlValidationResult {
+            val trimmed = rawUrl.trim()
+            if ('?' in trimmed || '#' in trimmed) {
+                return BaseUrlValidationResult.ContainsCredentialsOrQuery
+            }
+            val candidate = formatBaseUrl(trimmed)
+            val parsed = candidate.toHttpUrlOrNull() ?: return BaseUrlValidationResult.InvalidSchemeOrHost
+            if ((parsed.scheme != "https" && parsed.scheme != "http") || parsed.host.isBlank()) {
+                return BaseUrlValidationResult.InvalidSchemeOrHost
+            }
+            if (parsed.username.isNotEmpty() || parsed.password.isNotEmpty() || parsed.query != null || parsed.fragment != null) {
+                return BaseUrlValidationResult.ContainsCredentialsOrQuery
+            }
+            return BaseUrlValidationResult.Valid(
+                normalizedUrl = candidate,
+                isPlainHttp = parsed.scheme == "http"
+            )
+        }
     }
 
     private val json = Json {
@@ -206,6 +236,45 @@ class OpenAiApiClient(
         }
     }
 
+    suspend fun testConnection(
+        baseUrl: String,
+        apiKey: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            if (apiKey.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("API key is missing."))
+            }
+
+            val validated = when (val validation = validateBaseUrl(baseUrl)) {
+                is BaseUrlValidationResult.Valid -> validation
+                BaseUrlValidationResult.InvalidSchemeOrHost ->
+                    return@withContext Result.failure(IllegalArgumentException("Invalid base URL."))
+                BaseUrlValidationResult.ContainsCredentialsOrQuery ->
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Base URL must not contain credentials or query parameters.")
+                    )
+            }
+
+            val request = Request.Builder()
+                .url("${validated.normalizedUrl}models")
+                .addHeader("Authorization", "Bearer ${apiKey.trim()}")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body.string()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        parseErrorException(response.code, response.message, responseBody)
+                    )
+                }
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun executeTranscriptionRequest(request: Request): Result<String> {
         client.newCall(request).execute().use { response ->
             val responseBody = response.body.string()
@@ -257,11 +326,6 @@ class OpenAiApiClient(
         }
         return ApiHttpException(code, errorMessage)
     }
-
-    internal fun formatBaseUrl(baseUrl: String): String =
-        baseUrl.trim().ifBlank { SettingsRepository.DEFAULT_BASE_URL }.let {
-            if (it.endsWith("/")) it else "$it/"
-        }
 
     internal fun shouldUseMultipartTranscription(
         baseUrl: String,

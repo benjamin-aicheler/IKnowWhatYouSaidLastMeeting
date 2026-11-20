@@ -136,4 +136,16 @@
     <string name="action_next_month">Next month</string>
     <string name="action_show_api_key">Show API key</string>
     <string name="action_hide_api_key">Hide API key</string>
+
+    <!-- Base URL Validation & Connection Test -->
+    <string name="error_invalid_base_url">Enter a valid http:// or https:// base URL.</string>
+    <string name="error_base_url_credentials_or_query">Base URL must not contain credentials, query parameters, or fragments.</string>
+    <string name="warning_plain_http_base_url">Plain HTTP is unencrypted and may be blocked by Android unless configured for local development.</string>
+    <string name="action_test_connection">Test Connection</string>
+    <string name="msg_testing_connection">Testing connection…</string>
+    <string name="msg_connection_test_success">Connection successful (/models endpoint reachable).</string>
+    <string name="msg_connection_test_failed">Connection test failed: %1$s</string>
+    <string name="confirm_discard_settings_title">Unsaved changes</string>
+    <string name="confirm_discard_settings_message">You have unsaved changes. Discard them and leave settings?</string>
+    <string name="action_discard">Discard</string>
 </resources>

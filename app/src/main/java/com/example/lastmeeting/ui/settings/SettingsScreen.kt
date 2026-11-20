@@ -1,6 +1,7 @@
 package com.example.lastmeeting.ui.settings
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -19,6 +21,8 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,6 +44,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.lastmeeting.R
+import com.example.lastmeeting.data.api.BaseUrlValidationResult
+import com.example.lastmeeting.data.api.OpenAiApiClient
+import com.example.lastmeeting.data.preferences.ApiSettings
 import com.example.lastmeeting.data.preferences.TranscriptionMode
 import com.example.lastmeeting.ui.theme.AppIcons
 
@@ -51,18 +58,70 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val settings by viewModel.settings.collectAsState()
+    val isLoaded by viewModel.isLoaded.collectAsState()
+    val isTestingConnection by viewModel.isTestingConnection.collectAsState()
+    val lastSavedSettings by viewModel.lastSavedSettings.collectAsState()
 
-    var baseUrl by remember(settings) { mutableStateOf(settings.baseUrl) }
-    var apiKey by remember(settings) { mutableStateOf(settings.apiKey) }
+    var baseline by remember { mutableStateOf<ApiSettings?>(null) }
+    var baseUrl by remember { mutableStateOf(settings.baseUrl) }
+    var apiKey by remember { mutableStateOf(settings.apiKey) }
     var showApiKey by remember { mutableStateOf(false) }
-    var transcriptionMode by remember(settings) { mutableStateOf(settings.transcriptionMode) }
+    var transcriptionMode by remember { mutableStateOf(settings.transcriptionMode) }
     var showModeMenu by remember { mutableStateOf(false) }
-    var transcriptionModel by remember(settings) { mutableStateOf(settings.transcriptionModel) }
-    var protocolModel by remember(settings) { mutableStateOf(settings.protocolModel) }
-    var transcriptionPrompt by remember(settings) { mutableStateOf(settings.transcriptionPrompt) }
-    var protocolPrompt by remember(settings) { mutableStateOf(settings.protocolPrompt) }
+    var transcriptionModel by remember { mutableStateOf(settings.transcriptionModel) }
+    var protocolModel by remember { mutableStateOf(settings.protocolModel) }
+    var transcriptionPrompt by remember { mutableStateOf(settings.transcriptionPrompt) }
+    var protocolPrompt by remember { mutableStateOf(settings.protocolPrompt) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
     val defaultTranscriptionPrompt = stringResource(R.string.default_transcription_prompt)
     val defaultProtocolPrompt = stringResource(R.string.default_protocol_prompt)
+
+    val hasUnsavedChanges = baseline?.let { saved ->
+        baseUrl.trim() != saved.baseUrl.trim() ||
+            apiKey.trim() != saved.apiKey.trim() ||
+            transcriptionMode != saved.transcriptionMode ||
+            transcriptionModel.trim() != saved.transcriptionModel.trim() ||
+            protocolModel.trim() != saved.protocolModel.trim() ||
+            transcriptionPrompt.trim() != saved.transcriptionPrompt.trim() ||
+            protocolPrompt.trim() != saved.protocolPrompt.trim()
+    } ?: false
+
+    fun applyBaseline(target: ApiSettings) {
+        baseline = target
+        baseUrl = target.baseUrl
+        apiKey = target.apiKey
+        transcriptionMode = target.transcriptionMode
+        transcriptionModel = target.transcriptionModel
+        protocolModel = target.protocolModel
+        transcriptionPrompt = target.transcriptionPrompt
+        protocolPrompt = target.protocolPrompt
+    }
+
+    LaunchedEffect(isLoaded, settings) {
+        if (isLoaded && (baseline == null || !hasUnsavedChanges)) {
+            applyBaseline(settings)
+        }
+    }
+
+    LaunchedEffect(lastSavedSettings) {
+        lastSavedSettings?.second?.let { saved ->
+            applyBaseline(saved)
+        }
+    }
+
+    val urlValidation = remember(baseUrl) { OpenAiApiClient.validateBaseUrl(baseUrl) }
+
+    fun handleBackPress() {
+        if (hasUnsavedChanges) {
+            showDiscardDialog = true
+        } else {
+            onNavigateBack()
+        }
+    }
+
+    BackHandler(enabled = hasUnsavedChanges) {
+        showDiscardDialog = true
+    }
 
     LaunchedEffect(Unit) {
         viewModel.messageFlow.collect { message ->
@@ -75,7 +134,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text(text = stringResource(R.string.title_settings)) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = ::handleBackPress) {
                         Icon(
                             imageVector = AppIcons.ArrowBack,
                             contentDescription = stringResource(R.string.action_back)
@@ -97,6 +156,25 @@ fun SettingsScreen(
                 value = baseUrl,
                 onValueChange = { baseUrl = it },
                 label = { Text(stringResource(R.string.label_api_base_url)) },
+                isError = urlValidation !is BaseUrlValidationResult.Valid,
+                supportingText = when (urlValidation) {
+                    is BaseUrlValidationResult.Valid -> if (urlValidation.isPlainHttp) {
+                        {
+                            Text(
+                                text = stringResource(R.string.warning_plain_http_base_url),
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    } else {
+                        null
+                    }
+                    BaseUrlValidationResult.InvalidSchemeOrHost -> {
+                        { Text(stringResource(R.string.error_invalid_base_url)) }
+                    }
+                    BaseUrlValidationResult.ContainsCredentialsOrQuery -> {
+                        { Text(stringResource(R.string.error_base_url_credentials_or_query)) }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -212,6 +290,22 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            OutlinedButton(
+                onClick = { viewModel.testConnection(baseUrl = baseUrl, apiKey = apiKey) },
+                enabled = !isTestingConnection,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = stringResource(
+                        if (isTestingConnection) {
+                            R.string.msg_testing_connection
+                        } else {
+                            R.string.action_test_connection
+                        }
+                    )
+                )
+            }
+
             Button(
                 onClick = {
                     viewModel.saveSettings(
@@ -229,6 +323,29 @@ fun SettingsScreen(
                 Text(text = stringResource(R.string.action_save_settings))
             }
         }
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text(stringResource(R.string.confirm_discard_settings_title)) },
+            text = { Text(stringResource(R.string.confirm_discard_settings_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardDialog = false
+                        onNavigateBack()
+                    }
+                ) {
+                    Text(stringResource(R.string.action_discard))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
     }
 }
 
