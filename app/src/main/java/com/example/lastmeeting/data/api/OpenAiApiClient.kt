@@ -166,22 +166,6 @@ class OpenAiApiClient(
         }
     }
 
-    suspend fun generateFromAudio(
-        baseUrl: String,
-        apiKey: String,
-        model: String,
-        prompt: String,
-        audioFile: File,
-        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO
-    ): Result<String> = transcribeAudio(
-        baseUrl = baseUrl,
-        apiKey = apiKey,
-        model = model,
-        prompt = prompt,
-        audioFile = audioFile,
-        transcriptionMode = transcriptionMode
-    )
-
     suspend fun generateFromText(
         baseUrl: String,
         apiKey: String,

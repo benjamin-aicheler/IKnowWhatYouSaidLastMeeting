@@ -85,9 +85,6 @@
     <string name="msg_protocol_deleted">Protokoll gelöscht.</string>
 
     <!-- AI Processing State -->
-    <string name="status_transcribing">Audio wird per KI transkribiert…</string>
-    <string name="status_protocolizing">Protokoll wird per KI erstellt…</string>
-    <string name="msg_ai_success">KI-Verarbeitung erfolgreich abgeschlossen.</string>
     <string name="msg_transcript_success">Transkript erfolgreich erstellt.</string>
     <string name="msg_protocol_success">Protokoll erfolgreich erstellt.</string>
     <string name="msg_ai_error">KI-Fehler: %1$s</string>
@@ -95,7 +92,6 @@
     <string name="msg_transcribe_first">Bitte transkribieren Sie die Sitzung zuerst, bevor Sie ein Protokoll erstellen.</string>
     <string name="msg_audio_too_large">Die Aufnahme überschreitet das Upload-Limit von 25 MB und konnte nicht gesendet werden.</string>
     <string name="msg_audio_too_large_split_failed">Die Aufnahme ist größer als 25 MB und konnte nicht in kleinere Audiosegmente aufgeteilt werden.</string>
-    <string name="msg_exported_pdf">PDF wurde unter Downloads/LastMeeting gespeichert.</string>
 
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI-kompatible API Base-URL</string>

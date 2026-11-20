@@ -84,8 +84,8 @@
 - **Architecture**: MVVM with Repository pattern
 - **Database**: Room
 - **Preferences**: Jetpack DataStore
-- **HTTP Client**: Ktor / OkHttp
-- **Dependency Injection**: Hilt / Kotlin-inject or ViewModel Factory
+- **HTTP Client**: OkHttp with kotlinx.serialization
+- **Dependency Injection**: Manual application-scoped composition (LastMeetingApp) with ViewModelProvider.Factory
 
 ---
 

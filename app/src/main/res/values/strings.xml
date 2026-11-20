@@ -85,9 +85,6 @@
     <string name="msg_protocol_deleted">Protocol deleted.</string>
 
     <!-- AI Processing State -->
-    <string name="status_transcribing">Transcribing audio via AI…</string>
-    <string name="status_protocolizing">Creating protocol via AI…</string>
-    <string name="msg_ai_success">AI operation completed successfully.</string>
     <string name="msg_transcript_success">Transcript generated successfully.</string>
     <string name="msg_protocol_success">Protocol generated successfully.</string>
     <string name="msg_ai_error">AI Error: %1$s</string>
@@ -95,7 +92,6 @@
     <string name="msg_transcribe_first">Please transcribe the meeting first before generating a protocol.</string>
     <string name="msg_audio_too_large">Recording exceeds the 25 MB upload limit and could not be sent.</string>
     <string name="msg_audio_too_large_split_failed">Recording exceeds 25 MB and could not be split into smaller audio segments.</string>
-    <string name="msg_exported_pdf">PDF exported to Downloads/LastMeeting.</string>
 
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI Compatible API Base URL</string>
