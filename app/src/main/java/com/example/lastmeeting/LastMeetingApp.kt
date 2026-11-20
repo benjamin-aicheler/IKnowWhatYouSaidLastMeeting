@@ -1,6 +1,7 @@
 package com.example.lastmeeting
 
 import android.app.Application
+import android.util.Log
 import com.example.lastmeeting.data.db.MeetingDatabase
 import com.example.lastmeeting.data.preferences.SettingsRepository
 import com.example.lastmeeting.repository.MeetingRepository
@@ -38,7 +39,7 @@ class LastMeetingApp : Application() {
             try {
                 meetingRepository.reconcileRecordings()
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("LastMeetingApp", "Failed to reconcile recordings", e)
             }
         }
     }

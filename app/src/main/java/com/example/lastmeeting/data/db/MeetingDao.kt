@@ -66,8 +66,8 @@ interface MeetingDao {
         return generation
     }
 
-    @Query("UPDATE meetings SET endTime = :endTime WHERE id = :id")
-    suspend fun finishMeeting(id: Long, endTime: Long)
+    @Query("UPDATE meetings SET endTime = :endTime, isDamaged = :isDamaged WHERE id = :id")
+    suspend fun finishMeeting(id: Long, endTime: Long, isDamaged: Boolean = false)
 
     @Query("DELETE FROM meetings WHERE id = :id")
     suspend fun deleteMeeting(id: Long)

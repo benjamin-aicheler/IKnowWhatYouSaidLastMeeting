@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -75,7 +76,7 @@ class AiProcessingWorker(
         try {
             setForeground(createForegroundInfo(taskType))
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("AiProcessingWorker", "Foreground promotion refused", e)
         }
     }
 

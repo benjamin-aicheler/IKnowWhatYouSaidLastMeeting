@@ -152,16 +152,20 @@ class RecordingServiceTest {
     }
 
     @Test
-    fun releasesTheRecorderWhenStopThrows() {
+    fun releasesTheRecorderWhenStopThrows() = runBlocking {
+        val store = FakeMeetingStore()
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
         startCommand()
         recorder.failAt = "stop"
 
-        runBlocking { service.stopRecording() }
+        service.stopRecording()
 
         // A failing stop() must not leave the native recorder and the microphone allocated.
         assertEquals(1, recorder.releaseCalls)
         assertFalse(service.isRecording.value)
         assertTrue(shadowOf(service).isStoppedBySelf)
+        assertEquals(listOf(1L), store.damagedIds)
     }
 
     @Test
@@ -367,6 +371,7 @@ class RecordingServiceTest {
         private var nextId = 1L
         val startedPaths: MutableList<String> = Collections.synchronizedList(mutableListOf())
         val finishedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
+        val damagedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
         val discardedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
 
         override suspend fun startMeeting(audioFile: File, startTime: Long): Long {
@@ -374,14 +379,20 @@ class RecordingServiceTest {
             return nextId++
         }
 
-        override suspend fun finishMeeting(id: Long, endTime: Long) {
+        override suspend fun finishMeeting(id: Long, endTime: Long, isDamaged: Boolean) {
             finishedIds.add(id)
+            if (isDamaged) {
+                damagedIds.add(id)
+            }
         }
 
-        override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long {
+        override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long, isDamaged: Boolean): Long {
             startedPaths.add(audioFile.absolutePath)
             val id = nextId++
             finishedIds.add(id)
+            if (isDamaged) {
+                damagedIds.add(id)
+            }
             return id
         }
 

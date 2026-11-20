@@ -5,7 +5,9 @@ import android.content.Context
 import androidx.room.Room
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -72,7 +74,8 @@ class MeetingGenerationPersistenceTest {
             MeetingDatabase.getDatabase(context).useDatabase { database ->
                 val dao = database.meetingDao()
                 assertEquals(original, dao.getMeetingByIdDirect(original.id))
-                assertEquals(2, database.openHelper.readableDatabase.version)
+                assertEquals(3, database.openHelper.readableDatabase.version)
+                assertFalse(dao.getMeetingByIdDirect(original.id)!!.isDamaged)
                 assertEquals(0L, dao.deleteTranscript(original.id))
                 assertEquals(0L, dao.deleteProtocol(original.id))
                 assertEquals(0, dao.updateTranscript(original.id, "Old transcript", 0L))
@@ -139,9 +142,44 @@ class MeetingGenerationPersistenceTest {
         }
     }
 
+    @Test
+    fun migration2To3AddsDamagedFlagDefaultingToFalse() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val name = "migration-2-3.db"
+        val original = meeting().copy(id = 7L)
+        context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).use { database ->
+            database.execSQL("""
+                CREATE TABLE meetings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    title TEXT NOT NULL, startTime INTEGER NOT NULL, endTime INTEGER NOT NULL,
+                    audioFilePath TEXT NOT NULL, transcript TEXT, protocol TEXT, createdAt INTEGER NOT NULL,
+                    transcriptGeneration INTEGER NOT NULL DEFAULT 0,
+                    protocolGeneration INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+            database.execSQL(
+                "INSERT INTO meetings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                arrayOf<Any?>(original.id, original.title, original.startTime, original.endTime,
+                    original.audioFilePath, original.transcript, original.protocol, original.createdAt, 0L, 0L)
+            )
+            database.version = 2
+        }
+
+        open(context, name).useDatabase { database ->
+            val dao = database.meetingDao()
+            assertEquals(3, database.openHelper.readableDatabase.version)
+            val migrated = dao.getMeetingByIdDirect(original.id)!!
+            assertEquals(original, migrated)
+            assertFalse(migrated.isDamaged)
+
+            dao.finishMeeting(original.id, endTime = 5_000L, isDamaged = true)
+            assertTrue(dao.getMeetingByIdDirect(original.id)!!.isDamaged)
+        }
+    }
+
     private fun open(context: Context, name: String): MeetingDatabase =
         Room.databaseBuilder(context, MeetingDatabase::class.java, name)
-            .addMigrations(MeetingDatabase.MIGRATION_1_2).build()
+            .addMigrations(MeetingDatabase.MIGRATION_1_2, MeetingDatabase.MIGRATION_2_3).build()
 
     private inline fun <T> MeetingDatabase.useDatabase(block: (MeetingDatabase) -> T): T =
         try { block(this) } finally { close() }

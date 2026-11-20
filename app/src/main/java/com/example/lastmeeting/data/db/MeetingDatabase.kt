@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [MeetingEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class MeetingDatabase : RoomDatabase() {
@@ -24,6 +24,12 @@ abstract class MeetingDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE meetings ADD COLUMN isDamaged INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var INSTANCE: MeetingDatabase? = null
 
@@ -33,7 +39,7 @@ abstract class MeetingDatabase : RoomDatabase() {
                     context.applicationContext,
                     MeetingDatabase::class.java,
                     "last_meeting_db"
-                ).addMigrations(MIGRATION_1_2).build()
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
                 INSTANCE = instance
                 instance
             }

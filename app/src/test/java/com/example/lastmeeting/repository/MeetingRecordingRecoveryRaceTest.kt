@@ -279,9 +279,9 @@ class MeetingRecordingRecoveryRaceTest {
             }
         }
 
-        override suspend fun finishMeeting(id: Long, endTime: Long) {
+        override suspend fun finishMeeting(id: Long, endTime: Long, isDamaged: Boolean) {
             synchronized(lock) {
-                items.value[id]?.let { items.value = items.value + (id to it.copy(endTime = endTime)) }
+                items.value[id]?.let { items.value = items.value + (id to it.copy(endTime = endTime, isDamaged = isDamaged)) }
             }
         }
 

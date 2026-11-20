@@ -14,6 +14,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.lastmeeting.LastMeetingApp
@@ -48,8 +49,8 @@ internal interface MeetingSessionStore {
     fun registerLiveRecording(audioFile: File) {}
     fun unregisterLiveRecording(audioFile: File) {}
     suspend fun startMeeting(audioFile: File, startTime: Long): Long
-    suspend fun finishMeeting(id: Long, endTime: Long)
-    suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long
+    suspend fun finishMeeting(id: Long, endTime: Long, isDamaged: Boolean = false)
+    suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long, isDamaged: Boolean = false): Long
     suspend fun discardMeeting(id: Long)
 }
 
@@ -66,11 +67,11 @@ internal fun MeetingRepository.asSessionStore(): MeetingSessionStore = object : 
     override suspend fun startMeeting(audioFile: File, startTime: Long): Long =
         this@asSessionStore.startMeeting(audioFile, startTime)
 
-    override suspend fun finishMeeting(id: Long, endTime: Long) =
-        this@asSessionStore.finishMeeting(id, endTime)
+    override suspend fun finishMeeting(id: Long, endTime: Long, isDamaged: Boolean) =
+        this@asSessionStore.finishMeeting(id, endTime, isDamaged)
 
-    override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long): Long =
-        this@asSessionStore.createMeeting(audioFile, startTime, endTime)
+    override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long, isDamaged: Boolean): Long =
+        this@asSessionStore.createMeeting(audioFile, startTime, endTime, isDamaged)
 
     override suspend fun discardMeeting(id: Long) =
         this@asSessionStore.discardMeeting(id)
@@ -193,7 +194,7 @@ class RecordingService : Service() {
 
             return outputFile
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to start recording", e)
             releaseRecorder(pendingRecorder)
             pendingFile?.delete()
             pendingFile?.let { file -> storePair?.second?.unregisterLiveRecording(file) }
@@ -266,10 +267,12 @@ class RecordingService : Service() {
         // can await the in-flight stop without deadlocking on the main thread.
         return withContext(Dispatchers.IO) {
             try {
+                var stopFailed = false
                 try {
                     session.recorder.stop()
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    stopFailed = true
+                    Log.e(TAG, "Failed to stop MediaRecorder cleanly", e)
                 } finally {
                     releaseRecorder(session.recorder)
                 }
@@ -287,10 +290,15 @@ class RecordingService : Service() {
                         try {
                             if (audioFile.exists() && audioFile.length() > 0L) {
                                 if (rowId != null) {
-                                    store.finishMeeting(rowId, endTime)
+                                    store.finishMeeting(rowId, endTime, isDamaged = stopFailed)
                                 } else {
                                     // The insert at start failed or never ran; fall back to the old path.
-                                    store.createMeeting(audioFile, session.startWallTime, endTime)
+                                    store.createMeeting(
+                                        audioFile,
+                                        session.startWallTime,
+                                        endTime,
+                                        isDamaged = stopFailed
+                                    )
                                 }
                             } else if (rowId != null) {
                                 store.discardMeeting(rowId)
@@ -332,7 +340,7 @@ class RecordingService : Service() {
         try {
             recorder?.release()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w(TAG, "Failed to release MediaRecorder", e)
         }
     }
 
@@ -436,6 +444,7 @@ class RecordingService : Service() {
     }
 
     companion object {
+        private const val TAG = "RecordingService"
         private const val DESTROY_STOP_TIMEOUT_MS = 2_000L
         private const val MEETING_ROW_TIMEOUT_MS = 5_000L
         const val CHANNEL_ID = "recording_service_channel"
