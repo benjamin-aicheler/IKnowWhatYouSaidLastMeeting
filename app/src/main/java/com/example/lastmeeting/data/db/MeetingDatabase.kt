@@ -10,7 +10,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 @Database(
     entities = [MeetingEntity::class],
     version = 4,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class MeetingDatabase : RoomDatabase() {
 
