@@ -22,7 +22,7 @@ class LastMeetingApp : Application() {
         private set
 
     lateinit var meetingRepository: MeetingRepository
-        private set
+        internal set
 
     override fun onCreate() {
         super.onCreate()

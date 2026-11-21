@@ -2,6 +2,7 @@ package io.github.benjamin_aicheler.lastmeeting.data.preferences
 
 import android.app.Application
 import android.content.res.Configuration
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import io.github.benjamin_aicheler.lastmeeting.R
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -12,6 +13,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.File
 import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
@@ -111,5 +113,111 @@ class PromptSettingsPersistenceTest {
         assertEquals("Project names: Phoenix, Apollo", customized.customTranscriptionPrompt)
         assertEquals("Project names: Phoenix, Apollo", customized.resolveTranscriptionPrompt(useMultipart = true))
         assertEquals("Project names: Phoenix, Apollo", customized.resolveTranscriptionPrompt(useMultipart = false))
+    }
+
+    @Test
+    fun providerConfigRevisionTracksProviderChangesOnly() = runBlocking {
+        val app = RuntimeEnvironment.getApplication()
+        val dataStoreFile = File(app.filesDir, "provider-rev-${System.nanoTime()}.preferences_pb")
+        val repository = SettingsRepository(
+            app,
+            PreferenceDataStoreFactory.create(produceFile = { dataStoreFile })
+        )
+        val defaultTranscriptionPrompt = app.getString(R.string.default_transcription_prompt)
+        val defaultProtocolPrompt = app.getString(R.string.default_protocol_prompt)
+
+        assertEquals(0L, repository.settingsFlow.first().providerConfigRevision)
+
+        // Saving effective defaults when nothing was stored yet must not bump the revision.
+        repository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "",
+            transcriptionMode = TranscriptionMode.AUTO,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = defaultTranscriptionPrompt,
+            protocolPrompt = defaultProtocolPrompt
+        )
+        assertEquals(0L, repository.settingsFlow.first().providerConfigRevision)
+
+        // Changing API key bumps revision to 1.
+        repository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "sk-first",
+            transcriptionMode = TranscriptionMode.AUTO,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = defaultTranscriptionPrompt,
+            protocolPrompt = defaultProtocolPrompt
+        )
+        assertEquals(1L, repository.settingsFlow.first().providerConfigRevision)
+
+        // Saving identical provider settings with trailing-slash normalization or custom prompts keeps revision 1.
+        repository.saveSettings(
+            baseUrl = "https://api.openai.com/v1",
+            apiKey = "  sk-first  ",
+            transcriptionMode = TranscriptionMode.AUTO,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Custom vocabulary hint",
+            protocolPrompt = "Custom protocol prompt"
+        )
+        assertEquals(1L, repository.settingsFlow.first().providerConfigRevision)
+
+        // Changing baseUrl, apiKey, transcriptionMode, transcriptionModel, and protocolModel each bump revision.
+        repository.saveSettings(
+            baseUrl = "https://openrouter.ai/api/v1/",
+            apiKey = "sk-first",
+            transcriptionMode = TranscriptionMode.AUTO,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Custom vocabulary hint",
+            protocolPrompt = "Custom protocol prompt"
+        )
+        assertEquals(2L, repository.settingsFlow.first().providerConfigRevision)
+
+        repository.saveSettings(
+            baseUrl = "https://openrouter.ai/api/v1/",
+            apiKey = "sk-second",
+            transcriptionMode = TranscriptionMode.AUTO,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Custom vocabulary hint",
+            protocolPrompt = "Custom protocol prompt"
+        )
+        assertEquals(3L, repository.settingsFlow.first().providerConfigRevision)
+
+        repository.saveSettings(
+            baseUrl = "https://openrouter.ai/api/v1/",
+            apiKey = "sk-second",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Custom vocabulary hint",
+            protocolPrompt = "Custom protocol prompt"
+        )
+        assertEquals(4L, repository.settingsFlow.first().providerConfigRevision)
+
+        repository.saveSettings(
+            baseUrl = "https://openrouter.ai/api/v1/",
+            apiKey = "sk-second",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = "whisper-1",
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Custom vocabulary hint",
+            protocolPrompt = "Custom protocol prompt"
+        )
+        assertEquals(5L, repository.settingsFlow.first().providerConfigRevision)
+
+        repository.saveSettings(
+            baseUrl = "https://openrouter.ai/api/v1/",
+            apiKey = "sk-second",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = "whisper-1",
+            protocolModel = "gpt-4o",
+            transcriptionPrompt = "Custom vocabulary hint",
+            protocolPrompt = "Custom protocol prompt"
+        )
+        assertEquals(6L, repository.settingsFlow.first().providerConfigRevision)
     }
 }

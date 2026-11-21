@@ -218,7 +218,14 @@ class MeetingDetailsViewModel(
                     savedStateHandle["confirm_transcript_replacement"] = true
                     return@launch
                 }
-                AiProcessingWorker.enqueue(app, meetingId, AiProcessingWorker.TASK_TRANSCRIBE, current.transcriptGeneration)
+                val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+                AiProcessingWorker.enqueue(
+                    app,
+                    meetingId,
+                    AiProcessingWorker.TASK_TRANSCRIBE,
+                    current.transcriptGeneration,
+                    configRevision
+                )
             } finally {
                 requestingTranscription = false
             }
@@ -232,7 +239,14 @@ class MeetingDetailsViewModel(
                 _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_transcribe_first)))
                 return@launch
             }
-            AiProcessingWorker.enqueue(app, meetingId, AiProcessingWorker.TASK_PROTOCOLIZE, current.protocolGeneration)
+            val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+            AiProcessingWorker.enqueue(
+                app,
+                meetingId,
+                AiProcessingWorker.TASK_PROTOCOLIZE,
+                current.protocolGeneration,
+                configRevision
+            )
         }
     }
 

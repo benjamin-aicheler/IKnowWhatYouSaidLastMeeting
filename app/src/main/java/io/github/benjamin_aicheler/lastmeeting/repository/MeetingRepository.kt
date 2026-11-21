@@ -6,7 +6,8 @@ import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeExcepti
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingDao
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingEntity
-import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
+import io.github.benjamin_aicheler.lastmeeting.data.preferences.ApiSettings
+import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsProvider
 import io.github.benjamin_aicheler.lastmeeting.util.AndroidAudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.DateTimeFormatters
@@ -20,10 +21,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+internal class ProviderConfigurationChangedException(message: String) : IllegalStateException(message)
+
 class MeetingRepository(
     private val context: Context,
     private val meetingDao: MeetingDao,
-    private val settingsRepository: SettingsRepository,
+    private val settingsRepository: SettingsProvider,
     private val apiClient: OpenAiApiClient = OpenAiApiClient(),
     private val deleteAudioFile: (File) -> Boolean = File::delete,
     private val recordingsDir: File = File(context.filesDir, "recordings"),
@@ -200,18 +203,32 @@ class MeetingRepository(
         }
     }
 
-    suspend fun transcribeMeeting(id: Long, generation: Long): Result<AiGenerationOutcome> {
+    private suspend fun requireMatchingSettings(expectedConfigRevision: Long): ApiSettings? {
+        if (expectedConfigRevision < 0L) return null
+        val snapshot = settingsRepository.settingsFlow.first()
+        return snapshot.takeIf { it.providerConfigRevision == expectedConfigRevision }
+    }
+
+    suspend fun transcribeMeeting(
+        id: Long,
+        generation: Long,
+        expectedConfigRevision: Long
+    ): Result<AiGenerationOutcome> {
         val meeting = meetingDao.getMeetingByIdDirect(id)
         if (meeting == null || meeting.transcriptGeneration != generation) {
             return Result.success(AiGenerationOutcome.Discarded)
         }
+
+        val settings = requireMatchingSettings(expectedConfigRevision)
+            ?: return Result.failure(
+                ProviderConfigurationChangedException(context.getString(R.string.msg_provider_config_changed))
+            )
 
         val audioFile = File(meeting.audioFilePath)
         if (!audioFile.exists()) {
             return Result.failure(Exception(context.getString(R.string.msg_audio_not_found)))
         }
 
-        val settings = settingsRepository.settingsFlow.first()
         if (settings.apiKey.isBlank()) {
             return Result.failure(Exception(context.getString(R.string.msg_missing_api_key)))
         }
@@ -235,6 +252,11 @@ class MeetingRepository(
                 val latest = meetingDao.getMeetingByIdDirect(id)
                 if (latest == null || latest.transcriptGeneration != generation) {
                     return Result.success(AiGenerationOutcome.Discarded)
+                }
+                if (settingsRepository.settingsFlow.first().providerConfigRevision != expectedConfigRevision) {
+                    return Result.failure(
+                        ProviderConfigurationChangedException(context.getString(R.string.msg_provider_config_changed))
+                    )
                 }
 
                 val segmentResult = apiClient.transcribeAudio(
@@ -275,18 +297,26 @@ class MeetingRepository(
         }
     }
 
-    suspend fun protocolizeMeeting(id: Long, generation: Long): Result<AiGenerationOutcome> {
+    suspend fun protocolizeMeeting(
+        id: Long,
+        generation: Long,
+        expectedConfigRevision: Long
+    ): Result<AiGenerationOutcome> {
         val meeting = meetingDao.getMeetingByIdDirect(id)
         if (meeting == null || meeting.protocolGeneration != generation) {
             return Result.success(AiGenerationOutcome.Discarded)
         }
+
+        val settings = requireMatchingSettings(expectedConfigRevision)
+            ?: return Result.failure(
+                ProviderConfigurationChangedException(context.getString(R.string.msg_provider_config_changed))
+            )
 
         val transcript = meeting.transcript?.trim()
         if (transcript.isNullOrEmpty()) {
             return Result.failure(Exception(context.getString(R.string.msg_transcribe_first)))
         }
 
-        val settings = settingsRepository.settingsFlow.first()
         if (settings.apiKey.isBlank()) {
             return Result.failure(Exception(context.getString(R.string.msg_missing_api_key)))
         }

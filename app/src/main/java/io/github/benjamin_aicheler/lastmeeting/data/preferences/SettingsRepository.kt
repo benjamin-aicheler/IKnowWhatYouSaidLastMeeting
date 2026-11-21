@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.benjamin_aicheler.lastmeeting.R
@@ -32,13 +33,23 @@ data class ApiSettings(
     val protocolModel: String,
     val transcriptionPrompt: String,
     val protocolPrompt: String,
-    val customTranscriptionPrompt: String? = null
+    val customTranscriptionPrompt: String? = null,
+    val providerConfigRevision: Long = 0L
 ) {
     fun resolveTranscriptionPrompt(useMultipart: Boolean): String =
         customTranscriptionPrompt ?: if (useMultipart) "" else transcriptionPrompt
 }
 
-class SettingsRepository(private val context: Context) {
+interface SettingsProvider {
+    val settingsFlow: Flow<ApiSettings>
+}
+
+class SettingsRepository internal constructor(
+    private val context: Context,
+    private val dataStore: DataStore<Preferences>
+) : SettingsProvider {
+
+    constructor(context: Context) : this(context, context.dataStore)
 
     companion object {
         val KEY_BASE_URL = stringPreferencesKey("api_base_url")
@@ -49,12 +60,18 @@ class SettingsRepository(private val context: Context) {
         val KEY_TRANSCRIPTION_PROMPT = stringPreferencesKey("transcription_prompt")
         val KEY_PROTOCOL_PROMPT = stringPreferencesKey("protocol_prompt")
         val KEY_TRANSCRIPTION_MODE = stringPreferencesKey("api_transcription_mode")
+        val KEY_PROVIDER_CONFIG_REVISION = longPreferencesKey("provider_config_revision")
         val KEY_CONSENT_NOTICE_ACKNOWLEDGED = booleanPreferencesKey("consent_notice_acknowledged")
 
         const val DEFAULT_BASE_URL = "https://api.openai.com/v1/"
         const val DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
         const val DEFAULT_PROTOCOL_MODEL = "gpt-4o-mini"
         internal const val LEGACY_RETIRED_MODEL = "gpt-4o-audio-preview"
+
+        internal fun normalizeBaseUrl(rawUrl: String?): String =
+            rawUrl?.trim().orEmpty().ifBlank { DEFAULT_BASE_URL }.let {
+                if (it.endsWith("/")) it else "$it/"
+            }
 
         internal fun resolveModel(
             stored: String?,
@@ -81,7 +98,7 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    val settingsFlow: Flow<ApiSettings> = context.dataStore.data.map { preferences ->
+    override val settingsFlow: Flow<ApiSettings> = dataStore.data.map { preferences ->
         val defaultTranscriptionPrompt = context.getString(R.string.default_transcription_prompt)
         val defaultProtocolPrompt = context.getString(R.string.default_protocol_prompt)
         val legacyModel = preferences[KEY_MODEL]
@@ -107,7 +124,8 @@ class SettingsRepository(private val context: Context) {
             transcriptionPrompt = customTranscription ?: defaultTranscriptionPrompt,
             protocolPrompt = preferences[KEY_PROTOCOL_PROMPT]?.takeIf { it.isNotBlank() }
                 ?: defaultProtocolPrompt,
-            customTranscriptionPrompt = customTranscription
+            customTranscriptionPrompt = customTranscription,
+            providerConfigRevision = preferences[KEY_PROVIDER_CONFIG_REVISION] ?: 0L
         )
     }
 
@@ -125,9 +143,41 @@ class SettingsRepository(private val context: Context) {
         val normalizedTranscriptionPrompt = normalizePromptOverride(transcriptionPrompt, defaultTranscriptionPrompt)
         val normalizedProtocolPrompt = normalizePromptOverride(protocolPrompt, defaultProtocolPrompt)
 
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
+            val previousBaseUrl = normalizeBaseUrl(preferences[KEY_BASE_URL])
+            val previousApiKey = (preferences[KEY_API_KEY] ?: "").trim()
+            val previousTranscriptionMode = TranscriptionMode.fromStorage(preferences[KEY_TRANSCRIPTION_MODE])
+            val legacyModel = preferences[KEY_MODEL]
+            val previousTranscriptionModel = resolveModel(
+                stored = preferences[KEY_TRANSCRIPTION_MODEL],
+                legacyStored = legacyModel,
+                defaultModel = DEFAULT_TRANSCRIPTION_MODEL
+            )
+            val previousProtocolModel = resolveModel(
+                stored = preferences[KEY_PROTOCOL_MODEL],
+                legacyStored = legacyModel,
+                defaultModel = DEFAULT_PROTOCOL_MODEL
+            )
+
+            val newBaseUrl = normalizeBaseUrl(baseUrl)
+            val newApiKey = apiKey.trim()
+            val newTranscriptionModel = resolveModel(
+                stored = transcriptionModel,
+                defaultModel = DEFAULT_TRANSCRIPTION_MODEL
+            )
+            val newProtocolModel = resolveModel(
+                stored = protocolModel,
+                defaultModel = DEFAULT_PROTOCOL_MODEL
+            )
+            val providerChanged =
+                previousBaseUrl != newBaseUrl ||
+                    previousApiKey != newApiKey ||
+                    previousTranscriptionMode != transcriptionMode ||
+                    previousTranscriptionModel != newTranscriptionModel ||
+                    previousProtocolModel != newProtocolModel
+
             preferences[KEY_BASE_URL] = baseUrl.trim()
-            preferences[KEY_API_KEY] = apiKey.trim()
+            preferences[KEY_API_KEY] = newApiKey
             preferences[KEY_TRANSCRIPTION_MODE] = transcriptionMode.storageValue
             preferences[KEY_TRANSCRIPTION_MODEL] = transcriptionModel.trim()
             preferences[KEY_PROTOCOL_MODEL] = protocolModel.trim()
@@ -142,15 +192,19 @@ class SettingsRepository(private val context: Context) {
             } else {
                 preferences.remove(KEY_PROTOCOL_PROMPT)
             }
+            if (providerChanged) {
+                preferences[KEY_PROVIDER_CONFIG_REVISION] =
+                    (preferences[KEY_PROVIDER_CONFIG_REVISION] ?: 0L) + 1L
+            }
         }
     }
 
-    val consentNoticeAcknowledgedFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+    val consentNoticeAcknowledgedFlow: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[KEY_CONSENT_NOTICE_ACKNOWLEDGED] ?: false
     }
 
     suspend fun acknowledgeConsentNotice() {
-        context.dataStore.edit { preferences ->
+        dataStore.edit { preferences ->
             preferences[KEY_CONSENT_NOTICE_ACKNOWLEDGED] = true
         }
     }
