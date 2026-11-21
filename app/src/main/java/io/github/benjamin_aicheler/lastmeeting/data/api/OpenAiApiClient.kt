@@ -111,6 +111,16 @@ class OpenAiApiClient(
 
     companion object {
         const val MAX_AUDIO_UPLOAD_BYTES: Long = 25L * 1024L * 1024L
+        internal const val MAX_API_ERROR_MESSAGE_CHARS = 300
+
+        private fun sanitizeErrorText(raw: String): String {
+            val collapsed = raw.replace(Regex("[\\s\\p{Cntrl}]+"), " ").trim()
+            return if (collapsed.length > MAX_API_ERROR_MESSAGE_CHARS) {
+                collapsed.take(MAX_API_ERROR_MESSAGE_CHARS - 1).trimEnd() + "…"
+            } else {
+                collapsed
+            }
+        }
 
         internal fun formatBaseUrl(baseUrl: String): String =
             baseUrl.trim().ifBlank { SettingsRepository.DEFAULT_BASE_URL }.let {
@@ -386,13 +396,17 @@ class OpenAiApiClient(
         }
 
     private fun parseErrorException(code: Int, httpMessage: String, responseBody: String): ApiHttpException {
-        val errorMessage = try {
-            val errorObj = json.decodeFromString<ApiErrorResponse>(responseBody)
-            errorObj.error?.message?.takeIf { it.isNotBlank() } ?: responseBody
+        val structuredMessage = try {
+            json.decodeFromString<ApiErrorResponse>(responseBody)
+                .error
+                ?.message
+                ?.let(::sanitizeErrorText)
+                ?.takeIf { it.isNotEmpty() }
         } catch (_: Exception) {
-            "HTTP $code: $httpMessage"
+            null
         }
-        return ApiHttpException(code, errorMessage)
+        val fallback = sanitizeErrorText("HTTP $code: ${httpMessage.trim()}").trimEnd(':', ' ')
+        return ApiHttpException(code, structuredMessage ?: fallback)
     }
 
     internal fun shouldUseMultipartTranscription(

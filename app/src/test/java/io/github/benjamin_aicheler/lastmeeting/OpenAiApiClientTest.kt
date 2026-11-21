@@ -715,4 +715,63 @@ class OpenAiApiClientTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun testParseErrorBoundsLongStructuredMessagesAndOmitsRawResponseBodies() = runBlocking {
+        val rawBodySecret = "RAW_HTML_OR_JSON_SECRET"
+        fun clientForMode(mode: String): OpenAiApiClient {
+            val httpClient = OkHttpClient.Builder()
+                .addInterceptor(Interceptor { chain ->
+                    val body = when (mode) {
+                        "raw-html" -> "<html><body>$rawBodySecret${"A".repeat(25_000)}</body></html>"
+                        "raw-json" -> """{"detail":"$rawBodySecret${"B".repeat(25_000)}"}"""
+                        else -> """{"error":{"message":"  Line 1\n\tLine 2 ${"C".repeat(1_000)}"}}"""
+                    }
+                    val mediaType = if (mode == "raw-html") "text/html" else "application/json"
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(502)
+                        .message("Bad Gateway")
+                        .body(body.toResponseBody(mediaType.toMediaType()))
+                        .build()
+                })
+                .build()
+            return OpenAiApiClient(httpClient = httpClient)
+        }
+
+        val rawJsonFail = clientForMode("raw-json").generateFromText(
+            baseUrl = "https://api.example.com/v1/",
+            apiKey = "sk-test",
+            model = "gpt-4o-mini",
+            systemPrompt = "Prompt",
+            userText = "Transcript"
+        ).exceptionOrNull() as? ApiHttpException
+        assertNotNull(rawJsonFail)
+        assertEquals("HTTP 502: Bad Gateway", rawJsonFail!!.message)
+        assertFalse(rawJsonFail.message!!.contains(rawBodySecret))
+
+        val rawHtmlFail = clientForMode("raw-html").generateFromText(
+            baseUrl = "https://api.example.com/v1/",
+            apiKey = "sk-test",
+            model = "gpt-4o-mini",
+            systemPrompt = "Prompt",
+            userText = "Transcript"
+        ).exceptionOrNull() as? ApiHttpException
+        assertNotNull(rawHtmlFail)
+        assertEquals("HTTP 502: Bad Gateway", rawHtmlFail!!.message)
+        assertFalse(rawHtmlFail.message!!.contains(rawBodySecret))
+
+        val longStructuredFail = clientForMode("long-structured").generateFromText(
+            baseUrl = "https://api.example.com/v1/",
+            apiKey = "sk-test",
+            model = "gpt-4o-mini",
+            systemPrompt = "Prompt",
+            userText = "Transcript"
+        ).exceptionOrNull() as? ApiHttpException
+        assertNotNull(longStructuredFail)
+        assertTrue(longStructuredFail!!.message!!.length <= OpenAiApiClient.MAX_API_ERROR_MESSAGE_CHARS)
+        assertTrue(longStructuredFail.message!!.startsWith("Line 1 Line 2 "))
+        assertTrue(longStructuredFail.message!!.endsWith("…"))
+    }
 }

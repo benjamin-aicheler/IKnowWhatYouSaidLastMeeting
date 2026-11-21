@@ -8,6 +8,7 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.workDataOf
 import io.github.benjamin_aicheler.lastmeeting.LastMeetingApp
 import io.github.benjamin_aicheler.lastmeeting.R
+import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingEntity
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.ApiSettings
@@ -15,6 +16,7 @@ import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsProvider
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
 import io.github.benjamin_aicheler.lastmeeting.repository.MeetingRepository
+import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmenter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -107,7 +109,12 @@ class AiProcessingWorkerTest {
 
         val result = worker.doWork()
         val expectedError = app.getString(R.string.msg_audio_not_found)
-        assertEquals(ListenableWorker.Result.failure(workDataOf(AiProcessingWorker.KEY_ERROR_MESSAGE to expectedError)), result)
+        assertEquals(
+            ListenableWorker.Result.failure(
+                workDataOf(AiProcessingWorker.KEY_ERROR_CODE to AiTaskErrorCode.AUDIO_NOT_FOUND.code)
+            ),
+            result
+        )
         assertEquals(expectedError, dao.getMeetingByIdDirect(id)!!.transcriptError)
 
         val notificationManager = app.getSystemService(NotificationManager::class.java)
@@ -277,8 +284,14 @@ class AiProcessingWorkerTest {
                     .setInputData(input)
                     .build()
                     .doWork()
-                assertEquals(ListenableWorker.Result.failure(workDataOf(AiProcessingWorker.KEY_ERROR_MESSAGE to expectedError)), result)
+                assertEquals(
+                    ListenableWorker.Result.failure(
+                        workDataOf(AiProcessingWorker.KEY_ERROR_CODE to AiTaskErrorCode.PROVIDER_CONFIG_CHANGED.code)
+                    ),
+                    result
+                )
                 val output = (result as ListenableWorker.Result.Failure).outputData
+                assertNull(output.getString(AiProcessingWorker.KEY_ERROR_MESSAGE))
                 assertFalse(output.keyValueMap.values.any { it.toString().contains("sk-secret") || it.toString().contains("provider-") })
             }
 
@@ -348,7 +361,9 @@ class AiProcessingWorkerTest {
                 .build()
                 .doWork()
             assertEquals(
-                ListenableWorker.Result.failure(workDataOf(AiProcessingWorker.KEY_ERROR_MESSAGE to expectedError)),
+                ListenableWorker.Result.failure(
+                    workDataOf(AiProcessingWorker.KEY_ERROR_CODE to AiTaskErrorCode.PROVIDER_CONFIG_CHANGED.code)
+                ),
                 failureResult
             )
             assertEquals(expectedError, dao.getMeetingByIdDirect(id)!!.transcriptError)
@@ -366,6 +381,178 @@ class AiProcessingWorkerTest {
             app.meetingRepository = previousRepository
             audioFile.delete()
         }
+    }
+
+    @Test
+    @Config(application = LastMeetingApp::class)
+    fun oversizedProviderErrorResponseProducesBoundedCodeAndPersistedMessageWithoutThrowing() = runBlocking {
+        val app = RuntimeEnvironment.getApplication() as LastMeetingApp
+        val dao = app.database.meetingDao()
+        val previousRepository = app.meetingRepository
+        app.settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "sk-test",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+        val audioFile = File.createTempFile("worker-oversized-err-", ".m4a", app.filesDir).apply { writeText("audio") }
+        val rawMarker = "RAW_PROVIDER_SECRET_PAYLOAD_"
+        val oversizedRawBody = """{"detail":"$rawMarker${"X".repeat(25_000)}"}"""
+        val oversizedStructuredMessage = """{"error":{"message":"$rawMarker${"Y".repeat(25_000)}"}}"""
+        try {
+            for (body in listOf(oversizedRawBody, oversizedStructuredMessage)) {
+                app.meetingRepository = MeetingRepository(
+                    context = app,
+                    meetingDao = dao,
+                    settingsRepository = app.settingsRepository,
+                    apiClient = OpenAiApiClient(
+                        httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                            Response.Builder()
+                                .request(chain.request())
+                                .protocol(Protocol.HTTP_1_1)
+                                .code(400)
+                                .message("Bad Request")
+                                .body(body.toResponseBody("application/json".toMediaType()))
+                                .build()
+                        }).build()
+                    )
+                )
+                val id = dao.insertMeeting(
+                    MeetingEntity(
+                        title = "Oversized HTTP error",
+                        startTime = 1L,
+                        endTime = 2L,
+                        audioFilePath = audioFile.absolutePath
+                    )
+                )
+                val worker = TestListenableWorkerBuilder<AiProcessingWorker>(app)
+                    .setInputData(
+                        workDataOf(
+                            AiProcessingWorker.KEY_MEETING_ID to id,
+                            AiProcessingWorker.KEY_TASK_TYPE to AiProcessingWorker.TASK_TRANSCRIBE,
+                            AiProcessingWorker.KEY_GENERATION to 0L,
+                            AiProcessingWorker.KEY_CONFIG_REVISION to configRevision
+                        )
+                    )
+                    .build()
+
+                val result = worker.doWork()
+                assertEquals(
+                    ListenableWorker.Result.failure(
+                        workDataOf(AiProcessingWorker.KEY_ERROR_CODE to AiTaskErrorCode.REQUEST_REJECTED.code)
+                    ),
+                    result
+                )
+                val output = (result as ListenableWorker.Result.Failure).outputData
+                assertNull(output.getString(AiProcessingWorker.KEY_ERROR_MESSAGE))
+
+                val persistedError = dao.getMeetingByIdDirect(id)!!.transcriptError!!
+                assertEquals(app.getString(R.string.msg_ai_error_request_rejected_http, 400), persistedError)
+                assertTrue(persistedError.length <= MeetingRepository.MAX_PERSISTED_ERROR_CHARS)
+                assertFalse(persistedError.contains(rawMarker))
+            }
+        } finally {
+            app.meetingRepository = previousRepository
+            audioFile.delete()
+        }
+    }
+
+    @Test
+    @Config(application = LastMeetingApp::class)
+    fun oversizedUnexpectedExceptionMessageProducesBoundedCodeAndPersistedMessageWithoutThrowing() = runBlocking {
+        val app = RuntimeEnvironment.getApplication() as LastMeetingApp
+        val dao = app.database.meetingDao()
+        val previousRepository = app.meetingRepository
+        app.settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "sk-test",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+        val audioFile = File.createTempFile("worker-oversized-exc-", ".m4a", app.filesDir).apply { writeText("audio") }
+        val oversizedMarker = "UNBOUNDED_STACK_TRACE_"
+        try {
+            app.meetingRepository = MeetingRepository(
+                context = app,
+                meetingDao = dao,
+                settingsRepository = app.settingsRepository,
+                audioSegmenter = AudioSegmenter { _, _ ->
+                    throw IllegalStateException("$oversizedMarker${"Z".repeat(25_000)}")
+                }
+            )
+            val id = dao.insertMeeting(
+                MeetingEntity(
+                    title = "Oversized unexpected error",
+                    startTime = 1L,
+                    endTime = 2L,
+                    audioFilePath = audioFile.absolutePath
+                )
+            )
+            val worker = TestListenableWorkerBuilder<AiProcessingWorker>(app)
+                .setInputData(
+                    workDataOf(
+                        AiProcessingWorker.KEY_MEETING_ID to id,
+                        AiProcessingWorker.KEY_TASK_TYPE to AiProcessingWorker.TASK_TRANSCRIBE,
+                        AiProcessingWorker.KEY_GENERATION to 0L,
+                        AiProcessingWorker.KEY_CONFIG_REVISION to configRevision
+                    )
+                )
+                .build()
+
+            val result = worker.doWork()
+            assertEquals(
+                ListenableWorker.Result.failure(
+                    workDataOf(AiProcessingWorker.KEY_ERROR_CODE to AiTaskErrorCode.UNKNOWN.code)
+                ),
+                result
+            )
+            val persistedError = dao.getMeetingByIdDirect(id)!!.transcriptError!!
+            assertEquals(app.getString(R.string.msg_ai_error_unknown), persistedError)
+            assertFalse(persistedError.contains(oversizedMarker))
+        } finally {
+            app.meetingRepository = previousRepository
+            audioFile.delete()
+        }
+    }
+
+    @Test
+    fun errorCodesDecodeRecognizedAndUnknownValues() {
+        assertEquals(AiTaskErrorCode.AUTH_FAILED, AiTaskErrorCode.fromCode("auth_failed"))
+        assertEquals(AiTaskErrorCode.PROVIDER_CONFIG_CHANGED, AiTaskErrorCode.fromCode("provider_config_changed"))
+        assertEquals(AiTaskErrorCode.INCOMPLETE_RESPONSE, AiTaskErrorCode.fromCode("incomplete_response"))
+        assertEquals(AiTaskErrorCode.UNKNOWN, AiTaskErrorCode.fromCode("unrecognized_future_code"))
+        assertEquals(AiTaskErrorCode.UNKNOWN, AiTaskErrorCode.fromCode(null))
+    }
+
+    @Test
+    fun incompleteResponseMapsToDedicatedCodeAndBoundsPersistedMessage() {
+        val context = RuntimeEnvironment.getApplication()
+        val normalError = IncompleteCompletionException("length", "truncated")
+        assertEquals(AiTaskErrorCode.INCOMPLETE_RESPONSE, AiTaskErrorCode.fromThrowable(normalError))
+        assertEquals(
+            context.getString(R.string.msg_ai_error_incomplete_response),
+            AiTaskErrorCode.INCOMPLETE_RESPONSE.localizedMessage(context)
+        )
+        assertEquals(
+            context.getString(R.string.msg_ai_incomplete_response, "length"),
+            AiTaskErrorCode.persistedMessage(context, normalError)
+        )
+
+        val oversizedReason = "length_${"X".repeat(500)}"
+        val boundedMessage = AiTaskErrorCode.persistedMessage(
+            context,
+            IncompleteCompletionException(oversizedReason, "truncated")
+        )
+        assertTrue(boundedMessage.length <= MeetingRepository.MAX_PERSISTED_ERROR_CHARS)
+        assertTrue(boundedMessage.contains("length_"))
     }
 
     private fun discarded() = ListenableWorker.Result.success(workDataOf(AiProcessingWorker.KEY_DISCARDED to true))

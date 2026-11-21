@@ -53,6 +53,12 @@ class AiRetryPolicyTest {
                 0
             )
         )
+        assertFalse(
+            AiRetryPolicy.isRetryable(
+                AiTaskException(AiTaskErrorCode.MISSING_API_KEY, "missing key"),
+                0
+            )
+        )
     }
 
     @Test

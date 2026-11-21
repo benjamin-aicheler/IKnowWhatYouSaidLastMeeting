@@ -13,6 +13,8 @@ import io.github.benjamin_aicheler.lastmeeting.util.AndroidAudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.DateTimeFormatters
 import io.github.benjamin_aicheler.lastmeeting.util.PdfExporter
+import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskErrorCode
+import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -234,11 +236,15 @@ class MeetingRepository(
 
         val audioFile = File(meeting.audioFilePath)
         if (!audioFile.exists()) {
-            return Result.failure(Exception(context.getString(R.string.msg_audio_not_found)))
+            return Result.failure(
+                AiTaskException(AiTaskErrorCode.AUDIO_NOT_FOUND, context.getString(R.string.msg_audio_not_found))
+            )
         }
 
         if (settings.apiKey.isBlank()) {
-            return Result.failure(Exception(context.getString(R.string.msg_missing_api_key)))
+            return Result.failure(
+                AiTaskException(AiTaskErrorCode.MISSING_API_KEY, context.getString(R.string.msg_missing_api_key))
+            )
         }
 
         val useMultipart = apiClient.shouldUseMultipartTranscription(
@@ -250,7 +256,11 @@ class MeetingRepository(
         val session = audioSegmenter.segmentIfNeeded(audioFile, OpenAiApiClient.MAX_AUDIO_UPLOAD_BYTES)
             .getOrElse { error ->
                 return Result.failure(
-                    IllegalArgumentException(context.getString(R.string.msg_audio_too_large_split_failed), error)
+                    AiTaskException(
+                        AiTaskErrorCode.AUDIO_SPLIT_FAILED,
+                        context.getString(R.string.msg_audio_too_large_split_failed),
+                        error
+                    )
                 )
             }
 
@@ -330,11 +340,15 @@ class MeetingRepository(
 
         val transcript = meeting.transcript?.trim()
         if (transcript.isNullOrEmpty()) {
-            return Result.failure(Exception(context.getString(R.string.msg_transcribe_first)))
+            return Result.failure(
+                AiTaskException(AiTaskErrorCode.TRANSCRIPT_REQUIRED, context.getString(R.string.msg_transcribe_first))
+            )
         }
 
         if (settings.apiKey.isBlank()) {
-            return Result.failure(Exception(context.getString(R.string.msg_missing_api_key)))
+            return Result.failure(
+                AiTaskException(AiTaskErrorCode.MISSING_API_KEY, context.getString(R.string.msg_missing_api_key))
+            )
         }
 
         val result = apiClient.generateFromText(
@@ -382,13 +396,23 @@ class MeetingRepository(
         generation: Long,
         errorMessage: String
     ): Boolean {
-        val bounded = errorMessage.trim().ifEmpty { "Unknown error" }.take(500)
+        val bounded = boundErrorMessage(context, errorMessage)
         val updated = if (isTranscriptTask) {
             meetingDao.updateTranscriptError(id, bounded, generation)
         } else {
             meetingDao.updateProtocolError(id, bounded, generation)
         }
         return updated > 0
+    }
+
+    companion object {
+        internal const val MAX_PERSISTED_ERROR_CHARS = 250
+
+        internal fun boundErrorMessage(context: Context, errorMessage: String): String =
+            errorMessage.replace(Regex("[\\s\\p{Cntrl}]+"), " ")
+                .trim()
+                .ifEmpty { context.getString(R.string.msg_ai_error_unknown) }
+                .take(MAX_PERSISTED_ERROR_CHARS)
     }
 
     suspend fun deleteTranscript(id: Long): Long? = meetingDao.deleteTranscript(id)
