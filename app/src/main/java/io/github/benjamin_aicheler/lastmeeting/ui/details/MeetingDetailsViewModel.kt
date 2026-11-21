@@ -10,8 +10,10 @@ import androidx.work.WorkManager
 import io.github.benjamin_aicheler.lastmeeting.LastMeetingApp
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingEntity
+import io.github.benjamin_aicheler.lastmeeting.repository.MeetingRepository
 import io.github.benjamin_aicheler.lastmeeting.util.ShareUtil
 import io.github.benjamin_aicheler.lastmeeting.worker.AiProcessingWorker
+import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskErrorCode
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -155,8 +157,13 @@ class MeetingDetailsViewModel(
                 _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(successMessageRes)))
             }
             WorkInfo.State.FAILED -> {
-                val errorMsg = info.outputData.getString(AiProcessingWorker.KEY_ERROR_MESSAGE)
-                    ?: "Unknown error"
+                val errorMsg = info.outputData.getString(AiProcessingWorker.KEY_ERROR_CODE)
+                    ?.let { AiTaskErrorCode.fromCode(it).localizedMessage(app) }
+                    ?: info.outputData.getString(AiProcessingWorker.KEY_ERROR_MESSAGE)
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.take(MeetingRepository.MAX_PERSISTED_ERROR_CHARS)
+                    ?: app.getString(R.string.msg_ai_error_unknown)
                 _eventFlow.emit(
                     DetailsUiEvent.ShowToast(app.getString(R.string.msg_ai_error, errorMsg))
                 )

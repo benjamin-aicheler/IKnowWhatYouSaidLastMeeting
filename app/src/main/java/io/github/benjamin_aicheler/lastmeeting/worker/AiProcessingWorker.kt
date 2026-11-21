@@ -27,6 +27,7 @@ import io.github.benjamin_aicheler.lastmeeting.LastMeetingApp
 import io.github.benjamin_aicheler.lastmeeting.MainActivity
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.repository.AiGenerationOutcome
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 class AiProcessingWorker(
@@ -44,7 +45,7 @@ class AiProcessingWorker(
         val configRevision = inputData.getLong(KEY_CONFIG_REVISION, MISSING_CONFIG_REVISION)
 
         val app = applicationContext as? LastMeetingApp
-            ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Application context unavailable."))
+            ?: return Result.failure(workDataOf(KEY_ERROR_CODE to AiTaskErrorCode.INVALID_WORK_REQUEST.code))
 
         val repository = app.meetingRepository
 
@@ -53,17 +54,23 @@ class AiProcessingWorker(
         promoteToForeground(taskType)
 
         if (taskType != TASK_TRANSCRIBE && taskType != TASK_PROTOCOLIZE) {
-            return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Unknown AI task type."))
+            return Result.failure(workDataOf(KEY_ERROR_CODE to AiTaskErrorCode.INVALID_WORK_REQUEST.code))
         }
         val isTranscriptTask = taskType == TASK_TRANSCRIBE
         if (runAttemptCount == 0) {
             repository.clearTaskError(meetingId, isTranscriptTask, generation)
         }
 
-        val apiResult = if (isTranscriptTask) {
-            repository.transcribeMeeting(meetingId, generation, configRevision)
-        } else {
-            repository.protocolizeMeeting(meetingId, generation, configRevision)
+        val apiResult = try {
+            if (isTranscriptTask) {
+                repository.transcribeMeeting(meetingId, generation, configRevision)
+            } else {
+                repository.protocolizeMeeting(meetingId, generation, configRevision)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            kotlin.Result.failure(e)
         }
 
         return apiResult.fold(
@@ -77,18 +84,18 @@ class AiProcessingWorker(
                 if (AiRetryPolicy.isRetryable(error, runAttemptCount)) {
                     Result.retry()
                 } else {
-                    val errorMessage = error.localizedMessage?.takeIf { it.isNotBlank() }
-                        ?: "AI processing failed."
+                    val errorCode = AiTaskErrorCode.fromThrowable(error)
+                    val persistedError = AiTaskErrorCode.persistedMessage(applicationContext, error)
                     val recorded = repository.recordTaskError(
                         id = meetingId,
                         isTranscriptTask = isTranscriptTask,
                         generation = generation,
-                        errorMessage = errorMessage
+                        errorMessage = persistedError
                     )
                     if (recorded) {
                         postCompletionNotification(meetingId, taskType, success = false)
                     }
-                    Result.failure(workDataOf(KEY_ERROR_MESSAGE to errorMessage))
+                    Result.failure(workDataOf(KEY_ERROR_CODE to errorCode.code))
                 }
             }
         )
@@ -198,6 +205,7 @@ class AiProcessingWorker(
     companion object {
         const val KEY_MEETING_ID = "meeting_id"
         const val KEY_TASK_TYPE = "task_type"
+        const val KEY_ERROR_CODE = "error_code"
         const val KEY_ERROR_MESSAGE = "error_message"
         const val KEY_GENERATION = "generation"
         const val KEY_CONFIG_REVISION = "config_revision"

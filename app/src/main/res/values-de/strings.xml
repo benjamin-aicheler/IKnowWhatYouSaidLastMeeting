@@ -100,6 +100,15 @@
     <string name="msg_audio_too_large_split_failed">Die Aufnahme ist größer als 25 MB und konnte nicht in kleinere Audiosegmente aufgeteilt werden.</string>
     <string name="msg_provider_config_changed">Die Anbieter-Einstellungen wurden geändert, nachdem diese Aufgabe eingereiht wurde. Bitte starten Sie sie erneut.</string>
     <string name="msg_ai_incomplete_response">Die KI-Antwort war unvollständig (%1$s). Vorhandene Ergebnisse wurden beibehalten.</string>
+    <string name="msg_ai_error_auth">Authentifizierung fehlgeschlagen. Bitte prüfen Sie Ihren API-Schlüssel und Ihre Berechtigungen.</string>
+    <string name="msg_ai_error_rate_limited">Anfragelimit erreicht. Bitte versuchen Sie es später erneut.</string>
+    <string name="msg_ai_error_request_rejected">Der API-Endpunkt hat die Anfrage abgelehnt. Prüfen Sie Modellname und Endpunkt-Einstellungen.</string>
+    <string name="msg_ai_error_request_rejected_http">Der API-Endpunkt hat die Anfrage abgelehnt (HTTP %1$d). Prüfen Sie Modellname und Endpunkt-Einstellungen.</string>
+    <string name="msg_ai_error_server">Der API-Server hat einen Fehler zurückgegeben. Bitte versuchen Sie es später erneut.</string>
+    <string name="msg_ai_error_network">Netzwerkfehler beim Kontaktieren des API-Endpunkts.</string>
+    <string name="msg_ai_error_invalid_response">Der API-Endpunkt hat eine unerwartete Antwort zurückgegeben.</string>
+    <string name="msg_ai_error_incomplete_response">Die KI-Antwort war unvollständig. Vorhandene Ergebnisse wurden beibehalten.</string>
+    <string name="msg_ai_error_unknown">KI-Verarbeitung fehlgeschlagen.</string>
 
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI-kompatible API Base-URL</string>

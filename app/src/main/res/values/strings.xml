@@ -100,6 +100,15 @@
     <string name="msg_audio_too_large_split_failed">Recording exceeds 25 MB and could not be split into smaller audio segments.</string>
     <string name="msg_provider_config_changed">Provider settings changed after this task was queued. Please start it again.</string>
     <string name="msg_ai_incomplete_response">The AI response was incomplete (%1$s). Existing results were kept.</string>
+    <string name="msg_ai_error_auth">Authentication failed. Please check your API key and permissions.</string>
+    <string name="msg_ai_error_rate_limited">Rate limit reached. Please try again later.</string>
+    <string name="msg_ai_error_request_rejected">The API endpoint rejected the request. Check your model name and endpoint settings.</string>
+    <string name="msg_ai_error_request_rejected_http">The API endpoint rejected the request (HTTP %1$d). Check your model name and endpoint settings.</string>
+    <string name="msg_ai_error_server">The API server returned an error. Please try again later.</string>
+    <string name="msg_ai_error_network">Network error while contacting the API endpoint.</string>
+    <string name="msg_ai_error_invalid_response">The API endpoint returned an unexpected response.</string>
+    <string name="msg_ai_error_incomplete_response">The AI response was incomplete. Existing results were kept.</string>
+    <string name="msg_ai_error_unknown">AI processing failed.</string>
 
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI Compatible API Base URL</string>
