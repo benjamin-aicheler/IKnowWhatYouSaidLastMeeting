@@ -146,6 +146,10 @@
     <string name="msg_testing_connection">Testing connection…</string>
     <string name="msg_connection_test_success">Connection successful (/models endpoint reachable).</string>
     <string name="msg_connection_test_failed">Connection test failed: %1$s</string>
+    <string name="msg_connection_test_auth_failed">Authentication failed (HTTP %1$d). Check your API key.</string>
+    <string name="msg_connection_test_models_unsupported">The server does not support the /models endpoint (HTTP %1$d).</string>
+    <string name="msg_connection_test_unexpected_response">The endpoint did not return an OpenAI-compatible model list. Check the API Base URL.</string>
+    <string name="msg_connection_test_network_failed">Could not reach the API server: %1$s</string>
     <string name="confirm_discard_settings_title">Unsaved changes</string>
     <string name="confirm_discard_settings_message">You have unsaved changes. Discard them and leave settings?</string>
     <string name="action_discard">Discard</string>

@@ -1,12 +1,16 @@
 package io.github.benjamin_aicheler.lastmeeting.ui.settings
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.benjamin_aicheler.lastmeeting.LastMeetingApp
 import io.github.benjamin_aicheler.lastmeeting.R
+import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
+import io.github.benjamin_aicheler.lastmeeting.data.api.UnexpectedModelsResponseException
+import io.github.benjamin_aicheler.lastmeeting.data.api.UnsupportedModelsEndpointException
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.ApiSettings
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
@@ -21,6 +25,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -122,12 +127,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         _messageFlow.emit(app.getString(R.string.msg_connection_test_success))
                     },
                     onFailure = { error ->
-                        _messageFlow.emit(
-                            app.getString(
-                                R.string.msg_connection_test_failed,
-                                error.localizedMessage ?: ""
-                            )
-                        )
+                        _messageFlow.emit(formatConnectionTestFailure(app, error))
                     }
                 )
             } finally {
@@ -135,4 +135,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+}
+
+internal fun formatConnectionTestFailure(context: Context, error: Throwable): String = when (error) {
+    is UnsupportedModelsEndpointException ->
+        context.getString(R.string.msg_connection_test_models_unsupported, error.code)
+    is UnexpectedModelsResponseException ->
+        context.getString(R.string.msg_connection_test_unexpected_response)
+    is ApiHttpException -> if (error.code == 401 || error.code == 403) {
+        context.getString(R.string.msg_connection_test_auth_failed, error.code)
+    } else {
+        context.getString(R.string.msg_connection_test_failed, error.localizedMessage ?: "HTTP ${error.code}")
+    }
+    is IOException ->
+        context.getString(R.string.msg_connection_test_network_failed, error.localizedMessage ?: "")
+    else ->
+        context.getString(R.string.msg_connection_test_failed, error.localizedMessage ?: "")
 }
