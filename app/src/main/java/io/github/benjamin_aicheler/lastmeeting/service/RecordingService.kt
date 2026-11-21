@@ -300,8 +300,13 @@ class RecordingService : Service() {
                                         isDamaged = stopFailed
                                     )
                                 }
-                            } else if (rowId != null) {
-                                store.discardMeeting(rowId)
+                            } else {
+                                if (rowId != null) {
+                                    store.discardMeeting(rowId)
+                                }
+                                if (audioFile.exists() && audioFile.length() == 0L) {
+                                    audioFile.delete()
+                                }
                             }
                         } finally {
                             store.unregisterLiveRecording(audioFile)

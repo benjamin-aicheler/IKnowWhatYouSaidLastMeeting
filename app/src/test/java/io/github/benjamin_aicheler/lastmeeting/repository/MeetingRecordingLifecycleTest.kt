@@ -77,6 +77,7 @@ class MeetingRecordingLifecycleTest {
 
         val meeting = dao.getMeetingByIdDirect(id)
         assertEquals(5_000_000L, meeting?.endTime ?: -1L)
+        assertTrue(meeting?.isDamaged == true)
         assertTrue(repository.allMeetings.first().any { it.id == id })
     }
 
@@ -102,6 +103,7 @@ class MeetingRecordingLifecycleTest {
         assertEquals(orphan.absolutePath, meeting.audioFilePath)
         assertEquals(7_000_000L, meeting.startTime)
         assertEquals(7_000_000L, meeting.endTime)
+        assertTrue(meeting.isDamaged)
     }
 
     @Test
@@ -166,6 +168,42 @@ class MeetingRecordingLifecycleTest {
         assertEquals(9_000L, meetings.single().startTime)
         assertEquals(70_000L, meetings.single().endTime)
         assertEquals(1, dao.getAllAudioPaths().count { it == liveFile.absolutePath })
+    }
+
+    @Test
+    fun reconciliationSkipsEmptyFilesAndKeepsNonemptyInterruptedRecordingsDamagedAcrossRepeatedRuns() = runBlocking {
+        val emptyOrphan = File(recordingsDir, "empty_orphan.m4a").apply { createNewFile() }
+        val emptyInterruptedFile = File(recordingsDir, "empty_interrupted.m4a").apply { createNewFile() }
+        val emptyInterruptedId = repository.startMeeting(emptyInterruptedFile, startTime = 1_000L)
+
+        val nonemptyOrphan = recording("nonempty_orphan.m4a").apply { setLastModified(6_000L) }
+        val nonemptyInterruptedFile = recording("nonempty_interrupted.m4a").apply { setLastModified(8_000L) }
+        val nonemptyInterruptedId = repository.startMeeting(nonemptyInterruptedFile, startTime = 2_000L)
+
+        assertEquals(3, repository.reconcileRecordings())
+        assertEquals(0, repository.reconcileRecordings())
+
+        assertNull(dao.getMeetingByIdDirect(emptyInterruptedId))
+        val knownPaths = dao.getAllAudioPaths()
+        assertTrue(emptyOrphan.absolutePath !in knownPaths)
+        assertTrue(emptyInterruptedFile.absolutePath !in knownPaths)
+
+        // Reconciliation never deletes files from storage.
+        assertTrue(emptyOrphan.exists())
+        assertTrue(emptyInterruptedFile.exists())
+
+        val meetings = repository.allMeetings.first()
+        assertEquals(2, meetings.size)
+        assertTrue(meetings.all { it.isDamaged })
+        assertEquals(
+            setOf(nonemptyInterruptedFile.absolutePath, nonemptyOrphan.absolutePath),
+            meetings.map { it.audioFilePath }.toSet()
+        )
+
+        val adoptedOrphanId = meetings.single { it.audioFilePath == nonemptyOrphan.absolutePath }.id
+        assertTrue(repository.deleteMeeting(nonemptyInterruptedId).isSuccess)
+        assertTrue(repository.deleteMeeting(adoptedOrphanId).isSuccess)
+        assertTrue(repository.allMeetings.first().isEmpty())
     }
 
     private fun recording(name: String): File =

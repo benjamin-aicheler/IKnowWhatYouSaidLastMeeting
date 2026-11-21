@@ -152,8 +152,12 @@ class MeetingRepository(
                     return@forEach
                 }
                 val audioFile = File(meeting.audioFilePath)
-                if (audioFile.exists()) {
-                    meetingDao.finishMeeting(meeting.id, maxOf(audioFile.lastModified(), meeting.startTime))
+                if (audioFile.exists() && audioFile.length() > 0L) {
+                    meetingDao.finishMeeting(
+                        meeting.id,
+                        maxOf(audioFile.lastModified(), meeting.startTime),
+                        isDamaged = true
+                    )
                 } else {
                     meetingDao.deleteMeeting(meeting.id)
                 }
@@ -162,7 +166,9 @@ class MeetingRepository(
 
             val knownPaths = meetingDao.getAllAudioPaths().toSet()
             val orphans = recordingRegistry.withLock {
-                recordingsDir.listFiles { file -> file.isFile && file.extension == "m4a" }.orEmpty().toList()
+                recordingsDir.listFiles { file ->
+                    file.isFile && file.extension == "m4a" && file.length() > 0L
+                }.orEmpty().toList()
             }
             orphans
                 .filterNot { orphan ->
@@ -179,7 +185,8 @@ class MeetingRepository(
                             audioFilePath = orphan.absolutePath,
                             transcript = null,
                             protocol = null,
-                            createdAt = System.currentTimeMillis()
+                            createdAt = System.currentTimeMillis(),
+                            isDamaged = true
                         )
                     )
                     changes++
