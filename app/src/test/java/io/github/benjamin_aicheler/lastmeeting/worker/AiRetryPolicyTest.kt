@@ -2,6 +2,7 @@ package io.github.benjamin_aicheler.lastmeeting.worker
 
 import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
+import io.github.benjamin_aicheler.lastmeeting.repository.ProviderConfigurationChangedException
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,6 +37,12 @@ class AiRetryPolicyTest {
         assertFalse(
             AiRetryPolicy.isRetryable(
                 AudioFileTooLargeException(30_000_000L, 25L * 1024L * 1024L, "too large"),
+                0
+            )
+        )
+        assertFalse(
+            AiRetryPolicy.isRetryable(
+                ProviderConfigurationChangedException("provider config changed"),
                 0
             )
         )

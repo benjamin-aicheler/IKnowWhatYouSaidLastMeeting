@@ -12,6 +12,7 @@ import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Before
 import org.junit.Test
@@ -48,10 +49,10 @@ class AiProcessingWorkerSchedulingTest {
     @Test
     fun newerRequestIsAcceptedAndSurvivesDelayedCancellationOfOlderWork() {
         for (task in listOf(AiProcessingWorker.TASK_TRANSCRIBE, AiProcessingWorker.TASK_PROTOCOLIZE)) {
-            AiProcessingWorker.enqueue(app, 1L, task, 0L).result.get()
+            AiProcessingWorker.enqueue(app, 1L, task, 0L, 0L).result.get()
             val old = workManager.getWorkInfosForUniqueWork(AiProcessingWorker.uniqueWorkName(1L, task, 0L)).get().single()
             // Simulate deletion committing, a new explicit request, then delayed cancellation.
-            AiProcessingWorker.enqueue(app, 1L, task, 1L).result.get()
+            AiProcessingWorker.enqueue(app, 1L, task, 1L, 0L).result.get()
             AiProcessingWorker.cancel(app, 1L, task, 0L).result.get()
 
             val current = workManager.getWorkInfosForUniqueWork(AiProcessingWorker.uniqueWorkName(1L, task, 1L)).get().single()
@@ -63,27 +64,38 @@ class AiProcessingWorkerSchedulingTest {
     }
 
     @Test
-    fun queuedWorkRetainsItsInputVersionWhenANewerVersionIsEnqueued() {
+    fun queuedWorkRetainsItsInputVersionAndConfigRevisionWhenANewerVersionIsEnqueued() {
         val task = AiProcessingWorker.TASK_TRANSCRIBE
-        AiProcessingWorker.enqueue(app, 1L, task, 0L).result.get()
+        AiProcessingWorker.enqueue(app, 1L, task, 0L, 7L).result.get()
         val old = workManager.getWorkInfosForUniqueWork(AiProcessingWorker.uniqueWorkName(1L, task, 0L)).get().single()
-        AiProcessingWorker.enqueue(app, 1L, task, 1L).result.get()
+        AiProcessingWorker.enqueue(app, 1L, task, 1L, 8L).result.get()
 
         WorkManagerTestInitHelper.getTestDriver(app)!!.setAllConstraintsMet(old.id)
 
         val finished = workManager.getWorkInfoById(old.id).get()!!
         assertEquals(WorkInfo.State.SUCCEEDED, finished.state)
         assertEquals(0L, finished.outputData.getLong(AiProcessingWorker.KEY_GENERATION, -1L))
+        assertEquals(7L, finished.outputData.getLong(AiProcessingWorker.KEY_CONFIG_REVISION, -1L))
         assertEquals(1L, finished.outputData.getLong(AiProcessingWorker.KEY_MEETING_ID, -1L))
         assertEquals(task, finished.outputData.getString(AiProcessingWorker.KEY_TASK_TYPE))
+        assertEquals(
+            setOf(
+                AiProcessingWorker.KEY_MEETING_ID,
+                AiProcessingWorker.KEY_TASK_TYPE,
+                AiProcessingWorker.KEY_GENERATION,
+                AiProcessingWorker.KEY_CONFIG_REVISION
+            ),
+            finished.outputData.keyValueMap.keys
+        )
+        assertFalse(finished.outputData.keyValueMap.keys.any { it.contains("key", ignoreCase = true) || it.contains("url", ignoreCase = true) })
     }
 
     @Test
     fun duplicateRequestsWithinTheSameVersionStillKeepTheOriginalJob() {
         val task = AiProcessingWorker.TASK_TRANSCRIBE
-        AiProcessingWorker.enqueue(app, 1L, task, 0L).result.get()
+        AiProcessingWorker.enqueue(app, 1L, task, 0L, 0L).result.get()
         val original = workManager.getWorkInfosForUniqueWork(AiProcessingWorker.uniqueWorkName(1L, task, 0L)).get().single()
-        AiProcessingWorker.enqueue(app, 1L, task, 0L).result.get()
+        AiProcessingWorker.enqueue(app, 1L, task, 0L, 0L).result.get()
         assertEquals(original.id,
             workManager.getWorkInfosForUniqueWork(AiProcessingWorker.uniqueWorkName(1L, task, 0L)).get().single().id)
     }

@@ -98,6 +98,7 @@
     <string name="msg_transcribe_first">Please transcribe the meeting first before generating a protocol.</string>
     <string name="msg_audio_too_large">Recording exceeds the 25 MB upload limit and could not be sent.</string>
     <string name="msg_audio_too_large_split_failed">Recording exceeds 25 MB and could not be split into smaller audio segments.</string>
+    <string name="msg_provider_config_changed">Provider settings changed after this task was queued. Please start it again.</string>
 
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI Compatible API Base URL</string>

@@ -5,17 +5,21 @@ import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingDao
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingEntity
+import io.github.benjamin_aicheler.lastmeeting.data.preferences.ApiSettings
+import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsProvider
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
 import io.github.benjamin_aicheler.lastmeeting.util.AndroidAudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmentationSession
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmenter
+import io.github.benjamin_aicheler.lastmeeting.worker.AiProcessingWorker
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -98,7 +102,7 @@ class MeetingRepositoryAiTest {
             )
         )
 
-        val result = repository.protocolizeMeeting(id, 0L)
+        val result = repository.protocolizeMeeting(id, 0L, currentRevision())
 
         assertTrue(result.isFailure)
         assertEquals(app.getString(R.string.msg_transcribe_first), result.exceptionOrNull()?.message)
@@ -153,7 +157,7 @@ class MeetingRepositoryAiTest {
             )
         )
 
-        val result = repository.protocolizeMeeting(id, 0L)
+        val result = repository.protocolizeMeeting(id, 0L, currentRevision())
 
         assertTrue(result.isSuccess)
         assertEquals("Generated Protocol Summary", dao.getMeetingByIdDirect(id)?.protocol)
@@ -181,7 +185,8 @@ class MeetingRepositoryAiTest {
         })
         val id = insertAiMeeting()
         val original = dao.getMeetingByIdDirect(id)!!
-        val pending = async(Dispatchers.Default) { repository.transcribeMeeting(id, 0L) }
+        val revision = currentRevision()
+        val pending = async(Dispatchers.Default) { repository.transcribeMeeting(id, 0L, revision) }
         try {
             withTimeout(10_000) { requestStarted.await() }
             assertEquals(original, dao.getMeetingByIdDirect(id))
@@ -205,7 +210,7 @@ class MeetingRepositoryAiTest {
         val id = insertAiMeeting()
         val original = dao.getMeetingByIdDirect(id)
 
-        assertTrue(repository.transcribeMeeting(id, 0L).isFailure)
+        assertTrue(repository.transcribeMeeting(id, 0L, currentRevision()).isFailure)
         assertEquals(original, dao.getMeetingByIdDirect(id))
     }
 
@@ -215,7 +220,7 @@ class MeetingRepositoryAiTest {
         val id = insertAiMeeting()
         val original = dao.getMeetingByIdDirect(id)
 
-        assertEquals(AiGenerationOutcome.Stored("Existing transcript"), repository.transcribeMeeting(id, 0L).getOrThrow())
+        assertEquals(AiGenerationOutcome.Stored("Existing transcript"), repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow())
         assertEquals(original, dao.getMeetingByIdDirect(id))
     }
 
@@ -227,7 +232,7 @@ class MeetingRepositoryAiTest {
             response(chain.request(), "Obsolete transcript")
         })
 
-        assertEquals(AiGenerationOutcome.Discarded, repository.transcribeMeeting(id, 0L).getOrThrow())
+        assertEquals(AiGenerationOutcome.Discarded, repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow())
         val current = dao.getMeetingByIdDirect(id)!!
         assertNull(current.transcript)
         assertEquals("Existing protocol", current.protocol)
@@ -251,10 +256,11 @@ class MeetingRepositoryAiTest {
             }
         })
         val id = insertAiMeeting()
-        val pending = async(Dispatchers.Default) { repository.protocolizeMeeting(id, 0L) }
+        val revision = currentRevision()
+        val pending = async(Dispatchers.Default) { repository.protocolizeMeeting(id, 0L, revision) }
         try {
             withTimeout(10_000) { requestStarted.await() }
-            repository.transcribeMeeting(id, 0L).getOrThrow()
+            repository.transcribeMeeting(id, 0L, revision).getOrThrow()
         } finally {
             releaseResponse.countDown()
         }
@@ -262,9 +268,9 @@ class MeetingRepositoryAiTest {
         assertEquals(AiGenerationOutcome.Discarded, pending.await().getOrThrow())
         assertNull(dao.getMeetingByIdDirect(id)!!.protocol)
         // A retry keeps the old generation and must not make another request.
-        assertEquals(AiGenerationOutcome.Discarded, repository.protocolizeMeeting(id, 0L).getOrThrow())
+        assertEquals(AiGenerationOutcome.Discarded, repository.protocolizeMeeting(id, 0L, revision).getOrThrow())
         assertEquals(1, protocolCalls.get())
-        assertEquals(AiGenerationOutcome.Stored("Generated protocol"), repository.protocolizeMeeting(id, 1L).getOrThrow())
+        assertEquals(AiGenerationOutcome.Stored("Generated protocol"), repository.protocolizeMeeting(id, 1L, revision).getOrThrow())
         assertEquals("Generated protocol", dao.getMeetingByIdDirect(id)!!.protocol)
     }
 
@@ -394,7 +400,8 @@ class MeetingRepositoryAiTest {
         )
         val id = insertAiMeeting()
 
-        val outcome = repository.transcribeMeeting(id, 0L).getOrThrow()
+        val revision = currentRevision()
+        val outcome = repository.transcribeMeeting(id, 0L, revision).getOrThrow()
 
         assertEquals(AiGenerationOutcome.Stored("Segment 1 text\n\nSegment 2 text"), outcome)
         assertEquals(2, calls.get())
@@ -426,7 +433,7 @@ class MeetingRepositoryAiTest {
         val id = insertAiMeeting()
         val original = dao.getMeetingByIdDirect(id)
 
-        val result = repository.transcribeMeeting(id, 0L)
+        val result = repository.transcribeMeeting(id, 0L, currentRevision())
 
         assertTrue(result.isFailure)
         assertTrue(cleanedUp)
@@ -452,7 +459,7 @@ class MeetingRepositoryAiTest {
             audioSegmenter = segmenter
         )
 
-        val outcome = repository.transcribeMeeting(id, 0L).getOrThrow()
+        val outcome = repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow()
 
         assertEquals(AiGenerationOutcome.Discarded, outcome)
         assertEquals(1, calls.get())
@@ -486,7 +493,7 @@ class MeetingRepositoryAiTest {
             transcriptionPrompt = defaultInstruction,
             protocolPrompt = app.getString(R.string.default_protocol_prompt)
         )
-        repository.transcribeMeeting(id, 0L).getOrThrow()
+        repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow()
         val defaultMultipart = capturedRequest!!.body as MultipartBody
         assertEquals(2, defaultMultipart.size)
 
@@ -500,7 +507,7 @@ class MeetingRepositoryAiTest {
             transcriptionPrompt = defaultInstruction,
             protocolPrompt = app.getString(R.string.default_protocol_prompt)
         )
-        repository.transcribeMeeting(id, 0L).getOrThrow()
+        repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow()
         val chatBuffer = Buffer()
         capturedRequest.body!!.writeTo(chatBuffer)
         val chatRoot = Json.parseToJsonElement(chatBuffer.readUtf8()).jsonObject
@@ -518,12 +525,254 @@ class MeetingRepositoryAiTest {
             transcriptionPrompt = "Vocabulary: Kubernetes, gRPC",
             protocolPrompt = app.getString(R.string.default_protocol_prompt)
         )
-        repository.transcribeMeeting(id, 0L).getOrThrow()
+        repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow()
         val customMultipart = capturedRequest.body as MultipartBody
         assertEquals(3, customMultipart.size)
         val promptBuffer = Buffer()
         customMultipart.part(2).body.writeTo(promptBuffer)
         assertEquals("Vocabulary: Kubernetes, gRPC", promptBuffer.readUtf8())
+    }
+
+    @Test
+    fun unchangedConfigRevisionUploadsToCapturedSnapshotAndStoresResult() = runBlocking {
+        val requests = mutableListOf<Request>()
+        val fakeSettings = FakeSettingsProvider(
+            ApiSettings(
+                baseUrl = "https://provider-a.example/v1/",
+                apiKey = "sk-provider-a",
+                transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+                transcriptionModel = "whisper-1",
+                protocolModel = "gpt-4o-mini",
+                transcriptionPrompt = "Transcribe",
+                protocolPrompt = "Summarize",
+                providerConfigRevision = 4L
+            )
+        )
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = fakeSettings,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                    requests += chain.request()
+                    response(chain.request(), "Updated from provider A")
+                }).build()
+            )
+        )
+        val id = insertAiMeeting()
+
+        val transcribeOutcome = repository.transcribeMeeting(id, 0L, expectedConfigRevision = 4L).getOrThrow()
+        assertEquals(AiGenerationOutcome.Stored("Updated from provider A"), transcribeOutcome)
+        val protocolOutcome = repository.protocolizeMeeting(id, 1L, expectedConfigRevision = 4L).getOrThrow()
+        assertEquals(AiGenerationOutcome.Stored("Updated from provider A"), protocolOutcome)
+
+        assertEquals(2, requests.size)
+        assertEquals("https://provider-a.example/v1/audio/transcriptions", requests[0].url.toString())
+        assertEquals("Bearer sk-provider-a", requests[0].header("Authorization"))
+        assertEquals("https://provider-a.example/v1/chat/completions", requests[1].url.toString())
+        assertEquals("Bearer sk-provider-a", requests[1].header("Authorization"))
+    }
+
+    @Test
+    fun changedConfigRevisionBeforeAttemptFailsWithoutNetworkAndPreservesResults() = runBlocking {
+        val calls = AtomicInteger()
+        val fakeSettings = FakeSettingsProvider(
+            ApiSettings(
+                baseUrl = "https://provider-a.example/v1/",
+                apiKey = "sk-provider-a",
+                transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+                transcriptionModel = "whisper-1",
+                protocolModel = "gpt-4o-mini",
+                transcriptionPrompt = "Transcribe",
+                protocolPrompt = "Summarize",
+                providerConfigRevision = 1L
+            )
+        )
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = fakeSettings,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor {
+                    calls.incrementAndGet()
+                    error("Network must not be called after provider configuration changes")
+                }).build()
+            )
+        )
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)
+
+        fakeSettings.update {
+            it.copy(
+                baseUrl = "https://provider-b.example/v1/",
+                apiKey = "sk-provider-b",
+                providerConfigRevision = 2L
+            )
+        }
+
+        val transcribeResult = repository.transcribeMeeting(id, 0L, expectedConfigRevision = 1L)
+        val protocolResult = repository.protocolizeMeeting(id, 0L, expectedConfigRevision = 1L)
+
+        assertTrue(transcribeResult.exceptionOrNull() is ProviderConfigurationChangedException)
+        assertTrue(protocolResult.exceptionOrNull() is ProviderConfigurationChangedException)
+        assertEquals(0, calls.get())
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    @Test
+    fun changedConfigRevisionBetweenRetryAttemptsFailsWithoutUploadingToNewProvider() = runBlocking {
+        val requestedUrls = mutableListOf<String>()
+        val fakeSettings = FakeSettingsProvider(
+            ApiSettings(
+                baseUrl = "https://provider-a.example/v1/",
+                apiKey = "sk-provider-a",
+                transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+                transcriptionModel = "whisper-1",
+                protocolModel = "gpt-4o-mini",
+                transcriptionPrompt = "Transcribe",
+                protocolPrompt = "Summarize",
+                providerConfigRevision = 1L
+            )
+        )
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = fakeSettings,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                    requestedUrls += chain.request().url.toString()
+                    response(chain.request(), "Unavailable").newBuilder().code(503).message("Unavailable").build()
+                }).build()
+            )
+        )
+        val id = insertAiMeeting()
+
+        // Initial attempt reaches provider A and hits a retryable 503.
+        assertTrue(repository.transcribeMeeting(id, 0L, expectedConfigRevision = 1L).isFailure)
+        assertEquals(listOf("https://provider-a.example/v1/audio/transcriptions"), requestedUrls)
+
+        // User switches provider before the scheduled retry runs.
+        fakeSettings.update {
+            it.copy(
+                baseUrl = "https://provider-b.example/v1/",
+                apiKey = "sk-provider-b",
+                providerConfigRevision = 2L
+            )
+        }
+
+        // Retry still carries expectedConfigRevision = 1L and must abort before any upload.
+        val retryResult = repository.transcribeMeeting(id, 0L, expectedConfigRevision = 1L)
+        assertTrue(retryResult.exceptionOrNull() is ProviderConfigurationChangedException)
+        assertEquals(listOf("https://provider-a.example/v1/audio/transcriptions"), requestedUrls)
+    }
+
+    @Test
+    fun changedConfigRevisionMidSegmentationStopsWithoutUploadingRemainingSegmentsAndCleansUp() = runBlocking {
+        val seg1 = File.createTempFile("seg-rev-1-", ".m4a", app.cacheDir).apply { writeText("part1") }
+        val seg2 = File.createTempFile("seg-rev-2-", ".m4a", app.cacheDir).apply { writeText("part2") }
+        var cleanedUp = false
+        val segmenter = AudioSegmenter { _, _ ->
+            Result.success(AudioSegmentationSession(listOf(seg1, seg2)) { cleanedUp = true })
+        }
+        val fakeSettings = FakeSettingsProvider(
+            ApiSettings(
+                baseUrl = "https://provider-a.example/v1/",
+                apiKey = "sk-provider-a",
+                transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+                transcriptionModel = "whisper-1",
+                protocolModel = "gpt-4o-mini",
+                transcriptionPrompt = "Transcribe",
+                protocolPrompt = "Summarize",
+                providerConfigRevision = 3L
+            )
+        )
+        val calls = AtomicInteger()
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = fakeSettings,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                    calls.incrementAndGet()
+                    fakeSettings.update {
+                        it.copy(
+                            baseUrl = "https://provider-b.example/v1/",
+                            apiKey = "sk-provider-b",
+                            providerConfigRevision = 4L
+                        )
+                    }
+                    response(chain.request(), "Segment 1 text")
+                }).build()
+            ),
+            audioSegmenter = segmenter
+        )
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)
+
+        val result = repository.transcribeMeeting(id, 0L, expectedConfigRevision = 3L)
+
+        assertTrue(result.exceptionOrNull() is ProviderConfigurationChangedException)
+        assertEquals(1, calls.get())
+        assertTrue(cleanedUp)
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    @Test
+    fun missingConfigRevisionFailsClosedWithoutNetwork() = runBlocking {
+        val calls = AtomicInteger()
+        val fakeSettings = FakeSettingsProvider(
+            ApiSettings(
+                baseUrl = "https://provider-a.example/v1/",
+                apiKey = "sk-provider-a",
+                transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+                transcriptionModel = "whisper-1",
+                protocolModel = "gpt-4o-mini",
+                transcriptionPrompt = "Transcribe",
+                protocolPrompt = "Summarize",
+                providerConfigRevision = 0L
+            )
+        )
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = fakeSettings,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor {
+                    calls.incrementAndGet()
+                    error("Network must not be called when revision is missing")
+                }).build()
+            )
+        )
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)
+
+        val transcribeResult = repository.transcribeMeeting(
+            id,
+            0L,
+            expectedConfigRevision = AiProcessingWorker.MISSING_CONFIG_REVISION
+        )
+        val protocolResult = repository.protocolizeMeeting(
+            id,
+            0L,
+            expectedConfigRevision = AiProcessingWorker.MISSING_CONFIG_REVISION
+        )
+
+        assertTrue(transcribeResult.exceptionOrNull() is ProviderConfigurationChangedException)
+        assertTrue(protocolResult.exceptionOrNull() is ProviderConfigurationChangedException)
+        assertEquals(0, calls.get())
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    private suspend fun currentRevision(): Long =
+        settingsRepository.settingsFlow.first().providerConfigRevision
+
+    private class FakeSettingsProvider(initial: ApiSettings) : SettingsProvider {
+        private val state = MutableStateFlow(initial)
+        override val settingsFlow: Flow<ApiSettings> = state
+
+        fun update(transform: (ApiSettings) -> ApiSettings) {
+            state.value = transform(state.value)
+        }
     }
 
     private suspend fun configuredRepository(
@@ -554,8 +803,20 @@ class MeetingRepositoryAiTest {
         ))
     }
 
-    private suspend fun generate(repository: MeetingRepository, id: Long, transcriptTask: Boolean, generation: Long) =
-        if (transcriptTask) repository.transcribeMeeting(id, generation) else repository.protocolizeMeeting(id, generation)
+    private suspend fun generate(
+        repository: MeetingRepository,
+        id: Long,
+        transcriptTask: Boolean,
+        generation: Long,
+        configRevision: Long? = null
+    ): Result<AiGenerationOutcome> {
+        val revision = configRevision ?: currentRevision()
+        return if (transcriptTask) {
+            repository.transcribeMeeting(id, generation, revision)
+        } else {
+            repository.protocolizeMeeting(id, generation, revision)
+        }
+    }
 
     private fun response(request: Request, text: String): Response {
         val body = if (request.url.encodedPath.endsWith("/audio/transcriptions")) {

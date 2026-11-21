@@ -41,6 +41,7 @@ class AiProcessingWorker(
         // Work persisted by an older app version has no deletion version; never rebase it.
         val generation = inputData.getLong(KEY_GENERATION, -1L)
         if (generation < 0L) return Result.success(workDataOf(KEY_DISCARDED to true))
+        val configRevision = inputData.getLong(KEY_CONFIG_REVISION, MISSING_CONFIG_REVISION)
 
         val app = applicationContext as? LastMeetingApp
             ?: return Result.failure(workDataOf(KEY_ERROR_MESSAGE to "Application context unavailable."))
@@ -60,9 +61,9 @@ class AiProcessingWorker(
         }
 
         val apiResult = if (isTranscriptTask) {
-            repository.transcribeMeeting(meetingId, generation)
+            repository.transcribeMeeting(meetingId, generation, configRevision)
         } else {
-            repository.protocolizeMeeting(meetingId, generation)
+            repository.protocolizeMeeting(meetingId, generation, configRevision)
         }
 
         return apiResult.fold(
@@ -199,7 +200,9 @@ class AiProcessingWorker(
         const val KEY_TASK_TYPE = "task_type"
         const val KEY_ERROR_MESSAGE = "error_message"
         const val KEY_GENERATION = "generation"
+        const val KEY_CONFIG_REVISION = "config_revision"
         const val KEY_DISCARDED = "discarded"
+        const val MISSING_CONFIG_REVISION = -1L
 
         const val TASK_TRANSCRIBE = "TRANSCRIBE"
         const val TASK_PROTOCOLIZE = "PROTOCOLIZE"
@@ -223,7 +226,13 @@ class AiProcessingWorker(
             return workManager.cancelUniqueWork(uniqueWorkName(meetingId, taskType, generation))
         }
 
-        fun enqueue(context: Context, meetingId: Long, taskType: String, generation: Long): Operation {
+        fun enqueue(
+            context: Context,
+            meetingId: Long,
+            taskType: String,
+            generation: Long,
+            configRevision: Long
+        ): Operation {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
@@ -237,7 +246,8 @@ class AiProcessingWorker(
                     workDataOf(
                         KEY_MEETING_ID to meetingId,
                         KEY_TASK_TYPE to taskType,
-                        KEY_GENERATION to generation
+                        KEY_GENERATION to generation,
+                        KEY_CONFIG_REVISION to configRevision
                     )
                 )
                 .build()
