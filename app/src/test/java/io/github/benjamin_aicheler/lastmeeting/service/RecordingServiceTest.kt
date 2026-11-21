@@ -304,6 +304,24 @@ class RecordingServiceTest {
         assertTrue(shadowOf(service).isStoppedBySelf)
     }
 
+    @Test
+    fun stoppingEmptyRecordingDiscardsMeetingRowAndDeletesEmptyFile() = runBlocking {
+        val store = FakeMeetingStore()
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        recorder = FakeRecorder(writeEmptyOutput = true)
+
+        val outputFile = service.startRecording()
+        assertNotNull(outputFile)
+        assertEquals(0L, outputFile!!.length())
+
+        service.stopRecording()
+
+        assertEquals(listOf(1L), store.discardedIds)
+        assertTrue(store.finishedIds.isEmpty())
+        assertFalse(outputFile.exists())
+    }
+
     private fun assertStartupFailure(stage: String) {
         recorder.failAt = stage
         startCommand()
@@ -332,7 +350,8 @@ class RecordingServiceTest {
     }
 
     private class FakeRecorder(
-        private val onStop: (() -> Unit)? = null
+        private val onStop: (() -> Unit)? = null,
+        private val writeEmptyOutput: Boolean = false
     ) : AudioRecorder {
         var failAt: String? = null
         var failRelease = false
@@ -343,7 +362,11 @@ class RecordingServiceTest {
 
         override fun configure(outputFile: File) {
             this.outputFile = outputFile
-            outputFile.writeText("partial audio")
+            if (writeEmptyOutput) {
+                outputFile.writeBytes(byteArrayOf())
+            } else {
+                outputFile.writeText("partial audio")
+            }
             failIfRequested("configure")
         }
 
