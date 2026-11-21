@@ -4,6 +4,7 @@ import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsReposito
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -22,6 +23,7 @@ import okio.BufferedSink
 import java.io.File
 import java.io.IOException
 import java.util.Base64
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 @Serializable
@@ -32,7 +34,9 @@ internal data class ChatCompletionResponse(
 
 @Serializable
 internal data class ChatChoice(
-    val message: ChatMessageContent? = null
+    val message: ChatMessageContent? = null,
+    @SerialName("finish_reason")
+    val finishReason: String? = null
 )
 
 @Serializable
@@ -86,6 +90,11 @@ internal class AudioFileTooLargeException(
     val maxBytes: Long,
     message: String
 ) : IllegalArgumentException(message)
+
+internal class IncompleteCompletionException(
+    val finishReason: String,
+    message: String
+) : IllegalStateException(message)
 
 sealed class BaseUrlValidationResult {
     data class Valid(val normalizedUrl: String, val isPlainHttp: Boolean) : BaseUrlValidationResult()
@@ -350,11 +359,17 @@ class OpenAiApiClient(
             }
 
             val completionResponse = json.decodeFromString<ChatCompletionResponse>(responseBody)
-            val textResult = completionResponse.choices
-                .firstOrNull()
-                ?.message
-                ?.content
-                ?.trim()
+            val firstChoice = completionResponse.choices.firstOrNull()
+            val finishReason = firstChoice?.finishReason?.trim()?.takeIf { it.isNotEmpty() }
+            if (finishReason != null && !isCompleteFinishReason(finishReason)) {
+                return Result.failure(
+                    IncompleteCompletionException(
+                        finishReason = finishReason,
+                        message = "Incomplete response from API (finish_reason: $finishReason)."
+                    )
+                )
+            }
+            val textResult = firstChoice?.message?.content?.trim()
 
             return if (!textResult.isNullOrEmpty()) {
                 Result.success(textResult)
@@ -363,6 +378,12 @@ class OpenAiApiClient(
             }
         }
     }
+
+    private fun isCompleteFinishReason(finishReason: String): Boolean =
+        when (finishReason.trim().lowercase(Locale.ROOT)) {
+            "stop", "end_turn" -> true
+            else -> false
+        }
 
     private fun parseErrorException(code: Int, httpMessage: String, responseBody: String): ApiHttpException {
         val errorMessage = try {

@@ -3,6 +3,7 @@ package io.github.benjamin_aicheler.lastmeeting
 import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
+import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.api.UnexpectedModelsResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.UnsupportedModelsEndpointException
@@ -615,5 +616,103 @@ class OpenAiApiClientTest {
         assertFalse(ioErr is ApiHttpException)
         assertFalse(ioErr is UnexpectedModelsResponseException)
         assertEquals(1, ioCalls.get())
+    }
+
+    @Test
+    fun testChatCompletionAcceptsCompleteAndOmittedFinishReasons() = runBlocking {
+        val tempFile = File.createTempFile("meeting_complete_reason", ".m4a").apply {
+            writeBytes(byteArrayOf(1, 2, 3, 4))
+        }
+        try {
+            for (jsonPayload in listOf(
+                """{"choices":[{"message":{"content":"Complete output"},"finish_reason":"stop"}]}""",
+                """{"choices":[{"message":{"content":"Complete output"},"finish_reason":"STOP"}]}""",
+                """{"choices":[{"message":{"content":"Complete output"},"finish_reason":"end_turn"}]}""",
+                """{"choices":[{"message":{"content":"Complete output"},"finish_reason":null}]}""",
+                """{"choices":[{"message":{"content":"Complete output"}}]}"""
+            )) {
+                val client = OpenAiApiClient(
+                    httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                        Response.Builder()
+                            .request(chain.request())
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(200)
+                            .message("OK")
+                            .body(jsonPayload.toResponseBody("application/json".toMediaType()))
+                            .build()
+                    }).build()
+                )
+                val protocolResult = client.generateFromText(
+                    baseUrl = "https://api.example.com/v1/",
+                    apiKey = "sk-test",
+                    model = "gpt-4o-mini",
+                    systemPrompt = "Summarize",
+                    userText = "Meeting transcript"
+                )
+                assertEquals("Complete output", protocolResult.getOrNull())
+
+                val audioResult = client.transcribeAudio(
+                    baseUrl = "https://openrouter.ai/api/v1/",
+                    apiKey = "sk-test",
+                    model = "google/gemini-2.5-flash",
+                    prompt = "Transcribe",
+                    audioFile = tempFile,
+                    transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS
+                )
+                assertEquals("Complete output", audioResult.getOrNull())
+            }
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @Test
+    fun testChatCompletionRejectsIncompleteFinishReasons() = runBlocking {
+        val tempFile = File.createTempFile("meeting_incomplete_reason", ".m4a").apply {
+            writeBytes(byteArrayOf(1, 2, 3, 4))
+        }
+        try {
+            for (reason in listOf("length", "content_filter", "max_tokens")) {
+                val client = OpenAiApiClient(
+                    httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                        Response.Builder()
+                            .request(chain.request())
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(200)
+                            .message("OK")
+                            .body(
+                                """{"choices":[{"message":{"content":"Partial truncated text"},"finish_reason":"$reason"}]}"""
+                                    .toResponseBody("application/json".toMediaType())
+                            )
+                            .build()
+                    }).build()
+                )
+
+                val protocolResult = client.generateFromText(
+                    baseUrl = "https://api.example.com/v1/",
+                    apiKey = "sk-test",
+                    model = "gpt-4o-mini",
+                    systemPrompt = "Summarize",
+                    userText = "Meeting transcript"
+                )
+                val protocolError = protocolResult.exceptionOrNull() as? IncompleteCompletionException
+                assertNotNull("Expected IncompleteCompletionException for $reason", protocolError)
+                assertEquals(reason, protocolError!!.finishReason)
+
+                val audioResult = client.transcribeAudio(
+                    baseUrl = "https://openrouter.ai/api/v1/",
+                    apiKey = "sk-test",
+                    model = "google/gemini-2.5-flash",
+                    prompt = "Transcribe",
+                    audioFile = tempFile,
+                    transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS
+                )
+                val audioError = audioResult.exceptionOrNull() as? IncompleteCompletionException
+                assertNotNull("Expected IncompleteCompletionException for chat audio $reason", audioError)
+                assertEquals(reason, audioError!!.finishReason)
+            }
+        } finally {
+            tempFile.delete()
+        }
     }
 }

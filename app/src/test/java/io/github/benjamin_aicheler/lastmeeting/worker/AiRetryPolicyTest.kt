@@ -2,6 +2,7 @@ package io.github.benjamin_aicheler.lastmeeting.worker
 
 import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
+import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
 import io.github.benjamin_aicheler.lastmeeting.repository.ProviderConfigurationChangedException
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -43,6 +44,12 @@ class AiRetryPolicyTest {
         assertFalse(
             AiRetryPolicy.isRetryable(
                 ProviderConfigurationChangedException("provider config changed"),
+                0
+            )
+        )
+        assertFalse(
+            AiRetryPolicy.isRetryable(
+                IncompleteCompletionException("length", "truncated"),
                 0
             )
         )
