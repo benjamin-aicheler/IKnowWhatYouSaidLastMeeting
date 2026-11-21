@@ -4,6 +4,8 @@ import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
+import io.github.benjamin_aicheler.lastmeeting.data.api.UnexpectedModelsResponseException
+import io.github.benjamin_aicheler.lastmeeting.data.api.UnsupportedModelsEndpointException
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
 import io.github.benjamin_aicheler.lastmeeting.service.AndroidAudioRecorder
@@ -28,6 +30,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
@@ -510,5 +513,107 @@ class OpenAiApiClientTest {
         assertNotNull(exception)
         assertEquals(401, exception!!.code)
         assertEquals("Invalid API key", exception.message)
+    }
+
+    @Test
+    fun testConnectionValidatesModelListAndDistinguishesFailuresWithoutFallbackRequests() = runBlocking {
+        suspend fun runWithSyntheticResponse(
+            code: Int,
+            contentType: String,
+            body: String
+        ): Pair<Result<Unit>, Int> {
+            val calls = AtomicInteger()
+            val httpClient = OkHttpClient.Builder()
+                .addInterceptor(Interceptor { chain ->
+                    calls.incrementAndGet()
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(code)
+                        .message(if (code in 200..299) "OK" else "Error")
+                        .body(body.toResponseBody(contentType.toMediaType()))
+                        .build()
+                })
+                .build()
+            val result = OpenAiApiClient(httpClient = httpClient)
+                .testConnection("https://api.example.com/v1/", "sk-test")
+            return result to calls.get()
+        }
+
+        for (validPayload in listOf(
+            """{"object":"list","data":[{"id":"gpt-4o-mini"}]}""",
+            """{"data":[{"id":"google/gemini-2.5-flash"}]}""",
+            """{"data":[]}"""
+        )) {
+            val (result, callCount) = runWithSyntheticResponse(200, "application/json", validPayload)
+            assertTrue("Expected success for $validPayload", result.isSuccess)
+            assertEquals(1, callCount)
+        }
+
+        val (htmlResult, htmlCalls) = runWithSyntheticResponse(
+            200,
+            "text/html",
+            "<!doctype html><html><body>Welcome</body></html>"
+        )
+        assertTrue(htmlResult.exceptionOrNull() is UnexpectedModelsResponseException)
+        assertEquals(1, htmlCalls)
+
+        for (unexpectedJson in listOf(
+            """{"status":"ok"}""",
+            """{"data":null}""",
+            """{"data":[{}]}""",
+            """{"data":[{"id":123}]}""",
+            """{"data":[{"id":"   "}]}""",
+            """[]""",
+            ""
+        )) {
+            val (result, callCount) = runWithSyntheticResponse(200, "application/json", unexpectedJson)
+            assertTrue(
+                "Expected UnexpectedModelsResponseException for '$unexpectedJson'",
+                result.exceptionOrNull() is UnexpectedModelsResponseException
+            )
+            assertEquals(1, callCount)
+        }
+
+        for (unsupportedCode in listOf(404, 405, 501)) {
+            val (result, callCount) = runWithSyntheticResponse(
+                unsupportedCode,
+                "application/json",
+                """{"error":{"message":"Not found"}}"""
+            )
+            val err = result.exceptionOrNull() as? UnsupportedModelsEndpointException
+            assertNotNull("Expected UnsupportedModelsEndpointException for $unsupportedCode", err)
+            assertEquals(unsupportedCode, err!!.code)
+            assertEquals(1, callCount)
+        }
+
+        for (authCode in listOf(401, 403)) {
+            val (result, callCount) = runWithSyntheticResponse(
+                authCode,
+                "application/json",
+                """{"error":{"message":"Unauthorized"}}"""
+            )
+            val err = result.exceptionOrNull() as? ApiHttpException
+            assertNotNull(err)
+            assertFalse(err is UnsupportedModelsEndpointException)
+            assertEquals(authCode, err!!.code)
+            assertEquals(1, callCount)
+        }
+
+        val ioCalls = AtomicInteger()
+        val ioClient = OpenAiApiClient(
+            httpClient = OkHttpClient.Builder()
+                .addInterceptor(Interceptor {
+                    ioCalls.incrementAndGet()
+                    throw IOException("Connection refused")
+                })
+                .build()
+        )
+        val ioResult = ioClient.testConnection("https://api.example.com/v1/", "sk-test")
+        val ioErr = ioResult.exceptionOrNull()
+        assertTrue(ioErr is IOException)
+        assertFalse(ioErr is ApiHttpException)
+        assertFalse(ioErr is UnexpectedModelsResponseException)
+        assertEquals(1, ioCalls.get())
     }
 }

@@ -145,6 +145,10 @@
     <string name="msg_testing_connection">Verbindung wird getestet…</string>
     <string name="msg_connection_test_success">Verbindung erfolgreich (/models-Endpunkt erreichbar).</string>
     <string name="msg_connection_test_failed">Verbindungstest fehlgeschlagen: %1$s</string>
+    <string name="msg_connection_test_auth_failed">Authentifizierung fehlgeschlagen (HTTP %1$d). Prüfen Sie Ihren API-Schlüssel.</string>
+    <string name="msg_connection_test_models_unsupported">Der Server unterstützt den /models-Endpunkt nicht (HTTP %1$d).</string>
+    <string name="msg_connection_test_unexpected_response">Der Endpunkt hat keine OpenAI-kompatible Modellliste zurückgegeben. Prüfen Sie die API-Basis-URL.</string>
+    <string name="msg_connection_test_network_failed">Der API-Server konnte nicht erreicht werden: %1$s</string>
     <string name="confirm_discard_settings_title">Ungespeicherte Änderungen</string>
     <string name="confirm_discard_settings_message">Sie haben ungespeicherte Änderungen. Verwerfen und Einstellungen verlassen?</string>
     <string name="action_discard">Verwerfen</string>

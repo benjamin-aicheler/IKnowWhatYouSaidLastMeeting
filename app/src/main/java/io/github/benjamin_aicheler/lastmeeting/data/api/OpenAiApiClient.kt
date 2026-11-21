@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType
@@ -70,7 +72,14 @@ internal data class ApiErrorDetail(
  * A non-2xx response. Carries the status code so callers can tell a retryable server problem
  * from a request that will never succeed.
  */
-internal class ApiHttpException(val code: Int, message: String) : IOException(message)
+internal open class ApiHttpException(val code: Int, message: String) : IOException(message)
+
+internal class UnsupportedModelsEndpointException(code: Int, message: String) : ApiHttpException(code, message)
+
+internal class UnexpectedModelsResponseException(
+    message: String,
+    cause: Throwable? = null
+) : IOException(message, cause)
 
 internal class AudioFileTooLargeException(
     val fileSizeBytes: Long,
@@ -264,14 +273,52 @@ class OpenAiApiClient(
             client.newCall(request).execute().use { response ->
                 val responseBody = response.body.string()
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(
-                        parseErrorException(response.code, response.message, responseBody)
-                    )
+                    val httpError = parseErrorException(response.code, response.message, responseBody)
+                    if (response.code == 404 || response.code == 405 || response.code == 501) {
+                        return@withContext Result.failure(
+                            UnsupportedModelsEndpointException(
+                                response.code,
+                                httpError.message ?: "HTTP ${response.code}"
+                            )
+                        )
+                    }
+                    return@withContext Result.failure(httpError)
                 }
+                validateModelsListResponse(response.body.contentType(), responseBody)
                 Result.success(Unit)
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private fun validateModelsListResponse(contentType: MediaType?, responseBody: String) {
+        if (contentType != null && (
+                contentType.subtype.equals("html", ignoreCase = true) ||
+                    contentType.subtype.equals("xhtml+xml", ignoreCase = true)
+            )
+        ) {
+            throw UnexpectedModelsResponseException("Endpoint returned HTML instead of a JSON model list.")
+        }
+        if (responseBody.isBlank()) {
+            throw UnexpectedModelsResponseException("Endpoint returned an empty response.")
+        }
+        val element = try {
+            Json.parseToJsonElement(responseBody)
+        } catch (e: Exception) {
+            throw UnexpectedModelsResponseException("Endpoint did not return valid JSON.", e)
+        }
+        val root = element as? JsonObject
+            ?: throw UnexpectedModelsResponseException("Endpoint JSON response is not an object.")
+        val data = root["data"] as? JsonArray
+            ?: throw UnexpectedModelsResponseException("Model list JSON is missing a 'data' array.")
+        for (entry in data) {
+            val modelObj = entry as? JsonObject
+                ?: throw UnexpectedModelsResponseException("Model list entry is not a JSON object.")
+            val id = modelObj["id"] as? JsonPrimitive
+            if (id == null || !id.isString || id.content.isBlank()) {
+                throw UnexpectedModelsResponseException("Model list entry is missing a non-blank string 'id'.")
+            }
         }
     }
 
