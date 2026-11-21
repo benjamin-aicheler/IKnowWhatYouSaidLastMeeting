@@ -2,6 +2,7 @@ package io.github.benjamin_aicheler.lastmeeting.repository
 
 import android.app.Application
 import io.github.benjamin_aicheler.lastmeeting.R
+import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingDao
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingEntity
@@ -763,6 +764,126 @@ class MeetingRepositoryAiTest {
         assertEquals(original, dao.getMeetingByIdDirect(id))
     }
 
+    @Test
+    fun incompleteProtocolGenerationPreservesExistingProtocolAndGeneration() = runBlocking {
+        val repository = configuredRepository(Interceptor { chain ->
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(
+                    """{"choices":[{"message":{"content":"Truncated protocol"},"finish_reason":"length"}]}"""
+                        .toResponseBody("application/json".toMediaType())
+                )
+                .build()
+        })
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)!!
+
+        val result = repository.protocolizeMeeting(id, 0L, currentRevision())
+
+        assertTrue(result.exceptionOrNull() is IncompleteCompletionException)
+        assertEquals(
+            app.getString(R.string.msg_ai_incomplete_response, "length"),
+            result.exceptionOrNull()?.message
+        )
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    @Test
+    fun incompleteChatAudioTranscriptionPreservesExistingTranscriptAndProtocol() = runBlocking {
+        settingsRepository.saveSettings(
+            baseUrl = "https://openrouter.ai/api/v1/",
+            apiKey = "test-key",
+            transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS,
+            transcriptionModel = "google/gemini-2.5-flash",
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = settingsRepository,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body(
+                            """{"choices":[{"message":{"content":"Different partial transcript"},"finish_reason":"length"}]}"""
+                                .toResponseBody("application/json".toMediaType())
+                        )
+                        .build()
+                }).build()
+            )
+        )
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)!!
+
+        val result = repository.transcribeMeeting(id, 0L, currentRevision())
+
+        assertTrue(result.exceptionOrNull() is IncompleteCompletionException)
+        assertEquals(
+            app.getString(R.string.msg_ai_incomplete_response, "length"),
+            result.exceptionOrNull()?.message
+        )
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    @Test
+    fun incompleteSegmentedChatAudioCleansUpAndPreservesExistingResults() = runBlocking {
+        val seg1 = File.createTempFile("seg-inc-1-", ".m4a", app.cacheDir).apply { writeText("part1") }
+        val seg2 = File.createTempFile("seg-inc-2-", ".m4a", app.cacheDir).apply { writeText("part2") }
+        var cleanedUp = false
+        val segmenter = AudioSegmenter { _, _ ->
+            Result.success(AudioSegmentationSession(listOf(seg1, seg2)) { cleanedUp = true })
+        }
+        settingsRepository.saveSettings(
+            baseUrl = "https://openrouter.ai/api/v1/",
+            apiKey = "test-key",
+            transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS,
+            transcriptionModel = "google/gemini-2.5-flash",
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val calls = AtomicInteger()
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = settingsRepository,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                    val body = if (calls.incrementAndGet() == 1) {
+                        """{"choices":[{"message":{"content":"Segment 1 text"},"finish_reason":"stop"}]}"""
+                    } else {
+                        """{"choices":[{"message":{"content":"Segment 2 truncated"},"finish_reason":"length"}]}"""
+                    }
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body(body.toResponseBody("application/json".toMediaType()))
+                        .build()
+                }).build()
+            ),
+            audioSegmenter = segmenter
+        )
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)!!
+
+        val result = repository.transcribeMeeting(id, 0L, currentRevision())
+
+        assertTrue(result.exceptionOrNull() is IncompleteCompletionException)
+        assertTrue(cleanedUp)
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
     private suspend fun currentRevision(): Long =
         settingsRepository.settingsFlow.first().providerConfigRevision
 
@@ -774,7 +895,6 @@ class MeetingRepositoryAiTest {
             state.value = transform(state.value)
         }
     }
-
     private suspend fun configuredRepository(
         interceptor: Interceptor,
         audioSegmenter: AudioSegmenter = AndroidAudioSegmenter { File(app.cacheDir, "audio_segments") }

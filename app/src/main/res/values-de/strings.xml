@@ -99,6 +99,7 @@
     <string name="msg_audio_too_large">Die Aufnahme überschreitet das Upload-Limit von 25 MB und konnte nicht gesendet werden.</string>
     <string name="msg_audio_too_large_split_failed">Die Aufnahme ist größer als 25 MB und konnte nicht in kleinere Audiosegmente aufgeteilt werden.</string>
     <string name="msg_provider_config_changed">Die Anbieter-Einstellungen wurden geändert, nachdem diese Aufgabe eingereiht wurde. Bitte starten Sie sie erneut.</string>
+    <string name="msg_ai_incomplete_response">Die KI-Antwort war unvollständig (%1$s). Vorhandene Ergebnisse wurden beibehalten.</string>
 
     <!-- Settings -->
     <string name="label_api_base_url">OpenAI-kompatible API Base-URL</string>

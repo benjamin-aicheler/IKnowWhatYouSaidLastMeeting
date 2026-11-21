@@ -3,6 +3,7 @@ package io.github.benjamin_aicheler.lastmeeting.repository
 import android.content.Context
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
+import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingDao
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingEntity
@@ -284,6 +285,14 @@ class MeetingRepository(
                             )
                         )
                     }
+                    if (error is IncompleteCompletionException) {
+                        return Result.failure(
+                            IncompleteCompletionException(
+                                finishReason = error.finishReason,
+                                message = context.getString(R.string.msg_ai_incomplete_response, error.finishReason)
+                            )
+                        )
+                    }
                     return Result.failure(error)
                 }
                 transcriptParts.add(segmentText)
@@ -336,13 +345,27 @@ class MeetingRepository(
             userText = transcript
         )
 
-        return result.map { text ->
-            if (meetingDao.updateProtocol(id, text, generation) > 0) {
-                AiGenerationOutcome.Stored(text)
-            } else {
-                AiGenerationOutcome.Discarded
+        return result.fold(
+            onSuccess = { text ->
+                if (meetingDao.updateProtocol(id, text, generation) > 0) {
+                    Result.success(AiGenerationOutcome.Stored(text))
+                } else {
+                    Result.success(AiGenerationOutcome.Discarded)
+                }
+            },
+            onFailure = { error ->
+                if (error is IncompleteCompletionException) {
+                    Result.failure(
+                        IncompleteCompletionException(
+                            finishReason = error.finishReason,
+                            message = context.getString(R.string.msg_ai_incomplete_response, error.finishReason)
+                        )
+                    )
+                } else {
+                    Result.failure(error)
+                }
             }
-        }
+        )
     }
 
     suspend fun clearTaskError(id: Long, isTranscriptTask: Boolean, generation: Long) {
