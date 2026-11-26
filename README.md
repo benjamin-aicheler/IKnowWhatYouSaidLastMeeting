@@ -59,7 +59,7 @@
 
 - **Android Studio**: Latest version with Android Gradle Plugin (AGP) 9.5+ support
 - **JDK**: Java 21 (required by the Gradle daemon toolchain configuration)
-- **Android SDK**: `compileSdk = 37`, `targetSdk = 36`, `minSdk = 26`
+- **Android SDK**: `compileSdk = 37.2`, `targetSdk = 36`, `minSdk = 26`
 - **Android Device / Emulator**: Android 8.0 (API level 26) or higher
 
 ### Building the App
