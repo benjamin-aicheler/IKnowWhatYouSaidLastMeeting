@@ -7,7 +7,11 @@ plugins {
 
 android {
     namespace = "io.github.benjamin_aicheler.lastmeeting"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 2
+        }
+    }
 
     defaultConfig {
         applicationId = "io.github.benjamin_aicheler.lastmeeting"
