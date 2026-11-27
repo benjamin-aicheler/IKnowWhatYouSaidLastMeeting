@@ -39,7 +39,7 @@ jobs:
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
 
       - name: Run AGENTS.md quality gate
-        run: ./gradlew assembleDebug assembleRelease testDebugUnitTest lintDebug --continue
+        run: ./gradlew assembleDebug assembleRelease :app:compileDebugAndroidTestKotlin testDebugUnitTest lintDebug --continue
 
       - name: Upload unit test reports
         if: always()

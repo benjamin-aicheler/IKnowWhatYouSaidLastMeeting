@@ -10,7 +10,7 @@
 ### Audio Format & Storage
 - **Audio Format**: `M4A` (AAC audio encoding in MPEG-4 container, 32 kbps at 16 kHz mono so 1 hour is ~14.4 MB and stays below the 25 MB upload limit).
 - **Storage**: App-private storage (`context.filesDir/recordings/meeting_YYYYMMDD_HHMMSS.m4a`).
-- **Database**: Room Database storing meeting records:
+- **Database**: Room Database (schema v4) storing meeting records:
   - `id` (Long / Primary Key)
   - `title` (String, defaults to localized timestamp string, e.g., "Meeting 2024-11-24 14:30")
   - `startTime` (Long, epoch milliseconds)
@@ -20,6 +20,9 @@
   - `protocol` (String, nullable)
   - `createdAt` (Long)
   - `transcriptGeneration` / `protocolGeneration` (Long, default `0`; persisted invalidation versions)
+  - `isDamaged` (Boolean, default `false` / `0` in SQL; flags recordings that did not finalize cleanly or were recovered after interruption)
+  - `transcriptError` (String, nullable; persisted last transcription failure message)
+  - `protocolError` (String, nullable; persisted last protocol generation failure message)
 
 ### Recording Lifecycle
 - The meeting row is inserted as soon as the recorder runs, not after it stops, so an interrupted recording keeps a meeting instead of leaving an audio file nothing points at.
@@ -73,7 +76,7 @@
 - **Audio Recording**: Android `ForegroundService` with notification and `foregroundServiceType="microphone"`. Recording will not stop when the screen turns off or the app is minimized.
 - **AI Processing (Transcribing & Protocolizing)**: Background WorkManager / Service tasks with proper lifecycle management so network requests finish reliably when screen turns off. The worker runs in the foreground where the platform allows it.
 - **Retries**: `AiRetryPolicy` retries HTTP 429, 5xx and network failures, at most three runs with 30 s/60 s exponential backoff. Other 4xx, configuration and serialization failures fail immediately. There is no second retry loop in the HTTP client, so attempts are not multiplied.
-- **Deleting AI results**: Deleting a transcript or protocol atomically clears that field and increments its generation. AI work captures the generation when enqueued, retains it across retries, and writes only if that generation still matches. Work names include the generation so cancelling stale work cannot cancel or block a new explicit request. Stale results and legacy jobs without a generation are discarded quietly. Room migration 1→2 preserves existing meetings and initializes both generations to `0`.
+- **Deleting AI results**: Deleting a transcript or protocol atomically clears that field and increments its generation. AI work captures the generation when enqueued, retains it across retries, and writes only if that generation still matches. Work names include the generation so cancelling stale work cannot cancel or block a new explicit request. Stale results and legacy jobs without a generation are discarded quietly. Room migrations `1→2` (`transcriptGeneration`, `protocolGeneration` defaulting to `0`), `2→3` (`isDamaged` defaulting to `0`), and `3→4` (nullable `transcriptError`, `protocolError`) preserve existing meetings up to schema v4.
 
 ### Localization & Multi-Language Support
 - **Languages Supported**: English (`res/values/strings.xml`) and German (`res/values-de/strings.xml`).
@@ -107,7 +110,7 @@
 - **JDK**: Java 21 is required by `gradle/gradle-daemon-jvm.properties`. A system OpenJDK 21 on `PATH` is enough; set `JAVA_HOME` only when several JDKs are installed.
 - **Android SDK**: Point `ANDROID_HOME` at the installed SDK or set `sdk.dir` in an untracked `local.properties`. Keep the SDK outside `/tmp` and the project's `build/` directory so it survives `gradlew clean`.
 - **Gradle cache**: `GRADLE_USER_HOME` defaults to `~/.gradle`; keep the distribution and dependency caches there so builds stay incremental across checkouts.
-- **Repository helper**: `./scripts/build-local.sh` forwards its arguments to the Gradle wrapper and runs `assembleDebug testDebugUnitTest lintDebug` when called without arguments. It works from any directory and sources an optional profile at `.build.env` in the checkout root.
+- **Repository helper**: `./scripts/build-local.sh` forwards its arguments to the Gradle wrapper and runs `assembleDebug :app:compileDebugAndroidTestKotlin testDebugUnitTest lintDebug` when called without arguments. It works from any directory and sources an optional profile at `.build.env` in the checkout root.
 - **Local profile**: put machine-specific values such as `ANDROID_HOME` or `GRADLE_USER_HOME` in `.build.env`. It is git-ignored; do not commit it or the tool binaries it points to.
 - AGP resolves its own `aapt2` artifact per host architecture, so no resource-compiler override is needed on Linux ARM64 or x86_64.
 - Prefer incremental builds; run `clean` only when a failure or task warrants it, and run the failing Gradle task alone when troubleshooting.
