@@ -255,6 +255,11 @@ class MeetingRepository(
                 AiTaskException(AiTaskErrorCode.MISSING_API_KEY, context.getString(R.string.msg_missing_api_key))
             )
         }
+        val normalizedApiKey = runCatching {
+            OpenAiApiClient.normalizeAndValidateApiKey(settings.apiKey)
+        }.getOrElse { error ->
+            return Result.failure(error)
+        }
 
         val useMultipart = apiClient.shouldUseMultipartTranscription(
             baseUrl = settings.baseUrl,
@@ -288,7 +293,7 @@ class MeetingRepository(
 
                 val segmentResult = apiClient.transcribeAudio(
                     baseUrl = settings.baseUrl,
-                    apiKey = settings.apiKey,
+                    apiKey = normalizedApiKey,
                     model = settings.transcriptionModel,
                     prompt = effectivePrompt,
                     audioFile = segment,
@@ -371,10 +376,15 @@ class MeetingRepository(
                 AiTaskException(AiTaskErrorCode.MISSING_API_KEY, context.getString(R.string.msg_missing_api_key))
             )
         }
+        val normalizedApiKey = runCatching {
+            OpenAiApiClient.normalizeAndValidateApiKey(settings.apiKey)
+        }.getOrElse { error ->
+            return Result.failure(error)
+        }
 
         val result = apiClient.generateFromText(
             baseUrl = settings.baseUrl,
-            apiKey = settings.apiKey,
+            apiKey = normalizedApiKey,
             model = settings.protocolModel,
             systemPrompt = settings.protocolPrompt,
             userText = transcript

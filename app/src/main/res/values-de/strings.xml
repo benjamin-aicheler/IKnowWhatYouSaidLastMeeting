@@ -99,6 +99,7 @@
     <string name="msg_protocol_success">Protokoll erfolgreich erstellt.</string>
     <string name="msg_ai_error">KI-Fehler: %1$s</string>
     <string name="msg_missing_api_key">Bitte konfigurieren Sie zuerst Ihren API-Schlüssel in den Einstellungen.</string>
+    <string name="msg_ai_error_invalid_api_key">Der konfigurierte API-Schlüssel enthält ungültige Zeichen. Bitte prüfen Sie Ihren API-Schlüssel in den Einstellungen.</string>
     <string name="msg_transcribe_first">Bitte transkribieren Sie die Sitzung zuerst, bevor Sie ein Protokoll erstellen.</string>
     <string name="msg_audio_too_large">Die Aufnahme überschreitet das Upload-Limit von 25 MB und konnte nicht gesendet werden.</string>
     <string name="msg_audio_too_large_split_failed">Die Aufnahme ist größer als 25 MB und konnte nicht in kleinere Audiosegmente aufgeteilt werden.</string>
@@ -162,6 +163,7 @@
     <string name="msg_testing_connection">Verbindung wird getestet…</string>
     <string name="msg_connection_test_success">Verbindung erfolgreich (/models-Endpunkt erreichbar).</string>
     <string name="msg_connection_test_failed">Verbindungstest fehlgeschlagen: %1$s</string>
+    <string name="msg_connection_test_invalid_api_key">Der API-Schlüssel enthält ungültige Zeichen (z. B. Leerzeichen, Zeilenumbrüche oder unsichtbare Zeichen). Bitte prüfen Sie Ihren API-Schlüssel.</string>
     <string name="msg_connection_test_auth_failed">Authentifizierung fehlgeschlagen (HTTP %1$d). Prüfen Sie Ihren API-Schlüssel.</string>
     <string name="msg_connection_test_models_unsupported">Der Server unterstützt den /models-Endpunkt nicht (HTTP %1$d).</string>
     <string name="msg_connection_test_unexpected_response">Der Endpunkt hat keine OpenAI-kompatible Modellliste zurückgegeben. Prüfen Sie die API-Basis-URL.</string>

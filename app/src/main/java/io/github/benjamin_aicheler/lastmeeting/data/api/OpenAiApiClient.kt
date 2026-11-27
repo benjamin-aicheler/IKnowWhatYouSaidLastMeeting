@@ -110,6 +110,10 @@ internal class MalformedAiResponseException(
     cause: Throwable? = null
 ) : IllegalStateException(message, cause)
 
+internal class InvalidApiKeyException(
+    message: String = "API key contains invalid characters."
+) : IllegalArgumentException(message)
+
 sealed class BaseUrlValidationResult {
     data class Valid(val normalizedUrl: String, val isPlainHttp: Boolean) : BaseUrlValidationResult()
     data object InvalidSchemeOrHost : BaseUrlValidationResult()
@@ -120,12 +124,26 @@ class OpenAiApiClient(
     connectTimeoutSeconds: Long = 60,
     readTimeoutSeconds: Long = 300,
     writeTimeoutSeconds: Long = 120,
+    testConnectionTimeoutSeconds: Long = DEFAULT_TEST_CONNECTION_TIMEOUT_SECONDS,
     internal val httpClient: OkHttpClient? = null
 ) {
 
     companion object {
         const val MAX_AUDIO_UPLOAD_BYTES: Long = 25L * 1024L * 1024L
         internal const val MAX_API_ERROR_MESSAGE_CHARS = 300
+        internal const val DEFAULT_TEST_CONNECTION_TIMEOUT_SECONDS: Long = 15L
+
+        internal fun normalizeAndValidateApiKey(rawApiKey: String): String {
+            val trimmed = rawApiKey.trim()
+            if (trimmed.isEmpty()) {
+                throw IllegalArgumentException("API key is missing.")
+            }
+            if (trimmed.any { ch -> ch !in '\u0021'..'\u007E' }) {
+                // Fixed message avoids leaking any part of the key or OkHttp's raw header exception.
+                throw InvalidApiKeyException()
+            }
+            return trimmed
+        }
 
         private fun sanitizeErrorText(raw: String): String {
             val collapsed = raw.replace(Regex("[\\s\\p{Cntrl}]+"), " ").trim()
@@ -172,6 +190,16 @@ class OpenAiApiClient(
         .writeTimeout(writeTimeoutSeconds, TimeUnit.SECONDS)
         .build()
 
+    internal val mainHttpClient: OkHttpClient
+        get() = client
+
+    internal val testConnectionClient: OkHttpClient = client.newBuilder()
+        .connectTimeout(testConnectionTimeoutSeconds, TimeUnit.SECONDS)
+        .readTimeout(testConnectionTimeoutSeconds, TimeUnit.SECONDS)
+        .writeTimeout(testConnectionTimeoutSeconds, TimeUnit.SECONDS)
+        .callTimeout(testConnectionTimeoutSeconds, TimeUnit.SECONDS)
+        .build()
+
     suspend fun transcribeAudio(
         baseUrl: String,
         apiKey: String,
@@ -181,9 +209,7 @@ class OpenAiApiClient(
         transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            if (apiKey.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("API key is missing."))
-            }
+            val normalizedApiKey = normalizeAndValidateApiKey(apiKey)
 
             if (!audioFile.exists() || audioFile.length() == 0L) {
                 return@withContext Result.failure(IllegalArgumentException("Audio file does not exist or is empty."))
@@ -213,7 +239,7 @@ class OpenAiApiClient(
                 )
                 val request = Request.Builder()
                     .url("${normalizedBaseUrl}audio/transcriptions")
-                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Authorization", "Bearer $normalizedApiKey")
                     .post(body)
                     .build()
 
@@ -226,7 +252,7 @@ class OpenAiApiClient(
                 )
                 val request = Request.Builder()
                     .url("${normalizedBaseUrl}chat/completions")
-                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Authorization", "Bearer $normalizedApiKey")
                     .addHeader("Content-Type", "application/json")
                     .post(body)
                     .build()
@@ -248,9 +274,7 @@ class OpenAiApiClient(
         userText: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            if (apiKey.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("API key is missing."))
-            }
+            val normalizedApiKey = normalizeAndValidateApiKey(apiKey)
 
             if (userText.isBlank()) {
                 return@withContext Result.failure(IllegalArgumentException("Transcript text is missing."))
@@ -269,7 +293,7 @@ class OpenAiApiClient(
 
             val request = Request.Builder()
                 .url("${normalizedBaseUrl}chat/completions")
-                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Authorization", "Bearer $normalizedApiKey")
                 .addHeader("Content-Type", "application/json")
                 .post(body)
                 .build()
@@ -287,9 +311,7 @@ class OpenAiApiClient(
         apiKey: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            if (apiKey.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("API key is missing."))
-            }
+            val normalizedApiKey = normalizeAndValidateApiKey(apiKey)
 
             val validated = when (val validation = validateBaseUrl(baseUrl)) {
                 is BaseUrlValidationResult.Valid -> validation
@@ -303,11 +325,11 @@ class OpenAiApiClient(
 
             val request = Request.Builder()
                 .url("${validated.normalizedUrl}models")
-                .addHeader("Authorization", "Bearer ${apiKey.trim()}")
+                .addHeader("Authorization", "Bearer $normalizedApiKey")
                 .get()
                 .build()
 
-            executeCancellableCall(client, request) { response ->
+            executeCancellableCall(testConnectionClient, request) { response ->
                 val responseBody = response.body.string()
                 if (!response.isSuccessful) {
                     val httpError = parseErrorException(response.code, response.message, responseBody)
