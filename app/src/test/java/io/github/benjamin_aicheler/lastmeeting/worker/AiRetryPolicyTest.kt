@@ -2,7 +2,9 @@ package io.github.benjamin_aicheler.lastmeeting.worker
 
 import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
+import io.github.benjamin_aicheler.lastmeeting.data.api.EmptyAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
+import io.github.benjamin_aicheler.lastmeeting.data.api.MalformedAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.repository.ProviderConfigurationChangedException
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -59,6 +61,14 @@ class AiRetryPolicyTest {
                 0
             )
         )
+        assertFalse(
+            AiRetryPolicy.isRetryable(
+                AiTaskException(AiTaskErrorCode.EMPTY_TRANSCRIPT, "no speech"),
+                0
+            )
+        )
+        assertFalse(AiRetryPolicy.isRetryable(EmptyAiResponseException("empty"), 0))
+        assertFalse(AiRetryPolicy.isRetryable(MalformedAiResponseException("malformed"), 0))
     }
 
     @Test

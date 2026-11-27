@@ -8,7 +8,9 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.workDataOf
 import io.github.benjamin_aicheler.lastmeeting.LastMeetingApp
 import io.github.benjamin_aicheler.lastmeeting.R
+import io.github.benjamin_aicheler.lastmeeting.data.api.EmptyAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
+import io.github.benjamin_aicheler.lastmeeting.data.api.MalformedAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingEntity
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.ApiSettings
@@ -533,6 +535,8 @@ class AiProcessingWorkerTest {
         assertEquals(AiTaskErrorCode.AUTH_FAILED, AiTaskErrorCode.fromCode("auth_failed"))
         assertEquals(AiTaskErrorCode.PROVIDER_CONFIG_CHANGED, AiTaskErrorCode.fromCode("provider_config_changed"))
         assertEquals(AiTaskErrorCode.INCOMPLETE_RESPONSE, AiTaskErrorCode.fromCode("incomplete_response"))
+        assertEquals(AiTaskErrorCode.EMPTY_TRANSCRIPT, AiTaskErrorCode.fromCode("empty_transcript"))
+        assertEquals(AiTaskErrorCode.EMPTY_RESPONSE, AiTaskErrorCode.fromCode("empty_response"))
         assertEquals(AiTaskErrorCode.UNKNOWN, AiTaskErrorCode.fromCode("unrecognized_future_code"))
         assertEquals(AiTaskErrorCode.UNKNOWN, AiTaskErrorCode.fromCode(null))
     }
@@ -558,6 +562,92 @@ class AiProcessingWorkerTest {
         )
         assertTrue(boundedMessage.length <= MeetingRepository.MAX_PERSISTED_ERROR_CHARS)
         assertTrue(boundedMessage.contains("length_"))
+    }
+
+    @Test
+    @Config(application = LastMeetingApp::class)
+    fun blankTranscriptionFailsImmediatelyWithEmptyTranscriptCodeWithoutRetries() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        assertEquals(
+            AiTaskErrorCode.EMPTY_RESPONSE,
+            AiTaskErrorCode.fromThrowable(EmptyAiResponseException("empty"))
+        )
+        assertEquals(
+            AiTaskErrorCode.RESPONSE_PARSE_ERROR,
+            AiTaskErrorCode.fromThrowable(MalformedAiResponseException("malformed"))
+        )
+
+        val app = context as LastMeetingApp
+        val dao = app.database.meetingDao()
+        val previousRepository = app.meetingRepository
+        app.settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "sk-test",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+        val audioFile = File.createTempFile("worker-silent-", ".m4a", app.filesDir).apply { writeText("audio") }
+        val calls = AtomicInteger()
+        try {
+            app.meetingRepository = MeetingRepository(
+                context = app,
+                meetingDao = dao,
+                settingsRepository = app.settingsRepository,
+                apiClient = OpenAiApiClient(
+                    httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                        calls.incrementAndGet()
+                        Response.Builder()
+                            .request(chain.request())
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(200)
+                            .message("OK")
+                            .body("""{"text":""}""".toResponseBody("application/json".toMediaType()))
+                            .build()
+                    }).build()
+                )
+            )
+            val id = dao.insertMeeting(
+                MeetingEntity(
+                    title = "Silent recording",
+                    startTime = 1L,
+                    endTime = 2L,
+                    audioFilePath = audioFile.absolutePath,
+                    transcript = "Saved transcript",
+                    protocol = "Saved protocol"
+                )
+            )
+            val worker = TestListenableWorkerBuilder<AiProcessingWorker>(app)
+                .setInputData(
+                    workDataOf(
+                        AiProcessingWorker.KEY_MEETING_ID to id,
+                        AiProcessingWorker.KEY_TASK_TYPE to AiProcessingWorker.TASK_TRANSCRIBE,
+                        AiProcessingWorker.KEY_GENERATION to 0L,
+                        AiProcessingWorker.KEY_CONFIG_REVISION to configRevision
+                    )
+                )
+                .setRunAttemptCount(0)
+                .build()
+
+            val result = worker.doWork()
+            assertEquals(
+                ListenableWorker.Result.failure(
+                    workDataOf(AiProcessingWorker.KEY_ERROR_CODE to AiTaskErrorCode.EMPTY_TRANSCRIPT.code)
+                ),
+                result
+            )
+            assertEquals(1, calls.get())
+            val saved = dao.getMeetingByIdDirect(id)!!
+            assertEquals("Saved transcript", saved.transcript)
+            assertEquals("Saved protocol", saved.protocol)
+            assertEquals(app.getString(R.string.msg_ai_error_empty_transcript), saved.transcriptError)
+        } finally {
+            app.meetingRepository = previousRepository
+            audioFile.delete()
+        }
     }
 
     @Test

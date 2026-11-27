@@ -108,6 +108,8 @@
     <string name="msg_ai_error_network">Network error while contacting the API endpoint.</string>
     <string name="msg_ai_error_invalid_response">The API endpoint returned an unexpected response.</string>
     <string name="msg_ai_error_incomplete_response">The AI response was incomplete. Existing results were kept.</string>
+    <string name="msg_ai_error_empty_transcript">No speech was detected in the recording. Existing results were kept.</string>
+    <string name="msg_ai_error_empty_response">The AI returned an empty response. Existing results were kept.</string>
     <string name="msg_ai_error_unknown">AI processing failed.</string>
 
     <!-- Settings -->

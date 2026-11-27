@@ -103,6 +103,13 @@ internal class IncompleteCompletionException(
     message: String
 ) : IllegalStateException(message)
 
+internal class EmptyAiResponseException(message: String) : IllegalStateException(message)
+
+internal class MalformedAiResponseException(
+    message: String,
+    cause: Throwable? = null
+) : IllegalStateException(message, cause)
+
 sealed class BaseUrlValidationResult {
     data class Valid(val normalizedUrl: String, val isPlainHttp: Boolean) : BaseUrlValidationResult()
     data object InvalidSchemeOrHost : BaseUrlValidationResult()
@@ -224,7 +231,7 @@ class OpenAiApiClient(
                     .post(body)
                     .build()
 
-                executeChatCompletionRequest(request)
+                executeChatCompletionRequest(request, allowBlankContent = true)
             }
         } catch (e: CancellationException) {
             throw e
@@ -267,7 +274,7 @@ class OpenAiApiClient(
                 .post(body)
                 .build()
 
-            executeChatCompletionRequest(request)
+            executeChatCompletionRequest(request, allowBlankContent = false)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -394,16 +401,22 @@ class OpenAiApiClient(
             }
 
             val transcriptionResponse = json.decodeFromString<AudioTranscriptionResponse>(responseBody)
-            val textResult = transcriptionResponse.text?.trim()
-
-            if (!textResult.isNullOrEmpty()) {
-                Result.success(textResult)
-            } else {
-                Result.failure(IOException("No response content generated from API."))
+            transcriptionResponse.error?.let { apiError ->
+                val msg = apiError.message?.let(::sanitizeErrorText)?.takeIf { it.isNotEmpty() }
+                    ?: "API returned an error payload in a 2xx transcription response."
+                return@executeCancellableCall Result.failure(MalformedAiResponseException(msg))
             }
+            val rawText = transcriptionResponse.text
+                ?: return@executeCancellableCall Result.failure(
+                    MalformedAiResponseException("Transcription response is missing 'text' field.")
+                )
+            Result.success(rawText.trim())
         }
 
-    private suspend fun executeChatCompletionRequest(request: Request): Result<String> =
+    private suspend fun executeChatCompletionRequest(
+        request: Request,
+        allowBlankContent: Boolean
+    ): Result<String> =
         executeCancellableCall(client, request) { response ->
             val responseBody = response.body.string()
 
@@ -414,8 +427,16 @@ class OpenAiApiClient(
             }
 
             val completionResponse = json.decodeFromString<ChatCompletionResponse>(responseBody)
+            completionResponse.error?.let { apiError ->
+                val msg = apiError.message?.let(::sanitizeErrorText)?.takeIf { it.isNotEmpty() }
+                    ?: "API returned an error payload in a 2xx completion response."
+                return@executeCancellableCall Result.failure(MalformedAiResponseException(msg))
+            }
             val firstChoice = completionResponse.choices.firstOrNull()
-            val finishReason = firstChoice?.finishReason?.trim()?.takeIf { it.isNotEmpty() }
+                ?: return@executeCancellableCall Result.failure(
+                    MalformedAiResponseException("Chat completion response contained no choices.")
+                )
+            val finishReason = firstChoice.finishReason?.trim()?.takeIf { it.isNotEmpty() }
             if (finishReason != null && !isCompleteFinishReason(finishReason)) {
                 return@executeCancellableCall Result.failure(
                     IncompleteCompletionException(
@@ -424,12 +445,16 @@ class OpenAiApiClient(
                     )
                 )
             }
-            val textResult = firstChoice?.message?.content?.trim()
+            val rawContent = firstChoice.message?.content
+                ?: return@executeCancellableCall Result.failure(
+                    MalformedAiResponseException("Chat completion choice is missing message content.")
+                )
+            val textResult = rawContent.trim()
 
-            if (!textResult.isNullOrEmpty()) {
-                Result.success(textResult)
-            } else {
-                Result.failure(IOException("No response content generated from API."))
+            when {
+                textResult.isNotEmpty() -> Result.success(textResult)
+                allowBlankContent -> Result.success("")
+                else -> Result.failure(EmptyAiResponseException("No response content generated from API."))
             }
         }
 

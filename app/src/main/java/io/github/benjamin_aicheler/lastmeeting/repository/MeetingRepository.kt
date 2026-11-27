@@ -314,13 +314,21 @@ class MeetingRepository(
                     }
                     return Result.failure(error)
                 }
-                transcriptParts.add(segmentText)
+                val trimmedSegment = segmentText.trim()
+                if (trimmedSegment.isNotEmpty()) {
+                    transcriptParts.add(trimmedSegment)
+                }
             }
 
-            val mergedText = transcriptParts
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .joinToString("\n\n")
+            val mergedText = transcriptParts.joinToString("\n\n")
+            if (mergedText.isEmpty()) {
+                return Result.failure(
+                    AiTaskException(
+                        AiTaskErrorCode.EMPTY_TRANSCRIPT,
+                        context.getString(R.string.msg_ai_error_empty_transcript)
+                    )
+                )
+            }
 
             val updateResult = meetingDao.updateTranscriptAndReportSupersededProtocol(id, mergedText, generation)
             if (updateResult.updated) {

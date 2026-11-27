@@ -14,6 +14,8 @@ import io.github.benjamin_aicheler.lastmeeting.util.AndroidAudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmentationSession
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.worker.AiProcessingWorker
+import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskErrorCode
+import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -1031,6 +1033,69 @@ class MeetingRepositoryAiTest {
             okHttp.dispatcher.executorService.shutdown()
             okHttp.connectionPool.evictAll()
         }
+    }
+
+    @Test
+    fun silentSegmentsAreSkippedAndNonBlankSegmentsMergedInOrder() = runBlocking {
+        for (silentPosition in listOf(0, 1, 2)) {
+            val seg1 = File.createTempFile("seg-s1-", ".m4a", app.cacheDir).apply { writeText("1") }
+            val seg2 = File.createTempFile("seg-s2-", ".m4a", app.cacheDir).apply { writeText("2") }
+            val seg3 = File.createTempFile("seg-s3-", ".m4a", app.cacheDir).apply { writeText("3") }
+            var cleanedUp = false
+            val segmenter = AudioSegmenter { _, _ ->
+                Result.success(AudioSegmentationSession(listOf(seg1, seg2, seg3)) { cleanedUp = true })
+            }
+            val calls = AtomicInteger()
+            val repository = configuredRepository(
+                interceptor = Interceptor { chain ->
+                    val idx = calls.getAndIncrement()
+                    val text = if (idx == silentPosition) "" else "Part $idx"
+                    response(chain.request(), text)
+                },
+                audioSegmenter = segmenter
+            )
+            val id = insertAiMeeting()
+            val outcome = repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow()
+
+            val expected = (0..2).filter { it != silentPosition }.joinToString("\n\n") { "Part $it" }
+            assertEquals(AiGenerationOutcome.Stored(expected), outcome)
+            assertEquals(3, calls.get())
+            assertTrue(cleanedUp)
+            assertEquals(expected, dao.getMeetingByIdDirect(id)!!.transcript)
+            seg1.delete()
+            seg2.delete()
+            seg3.delete()
+        }
+    }
+
+    @Test
+    fun allBlankTranscriptionFailsWithEmptyTranscriptAndPreservesExistingResults(): Unit = runBlocking {
+        val seg1 = File.createTempFile("seg-b1-", ".m4a", app.cacheDir).apply { writeText("1") }
+        val seg2 = File.createTempFile("seg-b2-", ".m4a", app.cacheDir).apply { writeText("2") }
+        var cleanedUp = false
+        val segmenter = AudioSegmenter { _, _ ->
+            Result.success(AudioSegmentationSession(listOf(seg1, seg2)) { cleanedUp = true })
+        }
+        val calls = AtomicInteger()
+        val repository = configuredRepository(
+            interceptor = Interceptor { chain ->
+                calls.incrementAndGet()
+                response(chain.request(), "   ")
+            },
+            audioSegmenter = segmenter
+        )
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)!!
+
+        val result = repository.transcribeMeeting(id, 0L, currentRevision())
+
+        val error = result.exceptionOrNull() as? AiTaskException
+        assertEquals(AiTaskErrorCode.EMPTY_TRANSCRIPT, error?.errorCode)
+        assertEquals(2, calls.get())
+        assertTrue(cleanedUp)
+        assertEquals(original, dao.getMeetingByIdDirect(id))
+        seg1.delete()
+        seg2.delete()
     }
 
     private suspend fun currentRevision(): Long =
