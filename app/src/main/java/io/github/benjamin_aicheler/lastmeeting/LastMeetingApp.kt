@@ -5,7 +5,9 @@ import android.util.Log
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingDatabase
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
 import io.github.benjamin_aicheler.lastmeeting.repository.MeetingRepository
+import io.github.benjamin_aicheler.lastmeeting.util.AndroidAudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.PdfExporter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,11 +41,22 @@ class LastMeetingApp : Application() {
         applicationScope.launch {
             try {
                 PdfExporter.pruneExpiredSharedPdfs(cacheDir)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w("LastMeetingApp", "Failed to prune expired shared PDFs", e)
             }
             try {
+                AndroidAudioSegmenter.pruneAbandonedSessionsOnStartup(cacheDir)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("LastMeetingApp", "Failed to prune abandoned audio segment caches", e)
+            }
+            try {
                 meetingRepository.reconcileRecordings()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("LastMeetingApp", "Failed to reconcile recordings", e)
             }

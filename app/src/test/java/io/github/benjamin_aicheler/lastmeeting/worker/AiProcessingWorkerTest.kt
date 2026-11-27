@@ -17,10 +17,15 @@ import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsReposito
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
 import io.github.benjamin_aicheler.lastmeeting.repository.MeetingRepository
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmenter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -553,6 +558,62 @@ class AiProcessingWorkerTest {
         )
         assertTrue(boundedMessage.length <= MeetingRepository.MAX_PERSISTED_ERROR_CHARS)
         assertTrue(boundedMessage.contains("length_"))
+    }
+
+    @Test
+    @Config(application = LastMeetingApp::class)
+    fun cancelledWorkerRethrowsCancellationWithoutPersistingError() = runBlocking {
+        val app = RuntimeEnvironment.getApplication() as LastMeetingApp
+        val dao = app.database.meetingDao()
+        val previousRepository = app.meetingRepository
+        app.settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "sk-test",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+        val audioFile = File.createTempFile("worker-cancel-", ".m4a", app.filesDir).apply { writeText("audio") }
+        val segmentationStarted = CompletableDeferred<Unit>()
+        try {
+            app.meetingRepository = MeetingRepository(
+                context = app,
+                meetingDao = dao,
+                settingsRepository = app.settingsRepository,
+                audioSegmenter = AudioSegmenter { _, _ ->
+                    segmentationStarted.complete(Unit)
+                    throw CancellationException("Work cancelled")
+                }
+            )
+            val id = dao.insertMeeting(
+                MeetingEntity(
+                    title = "Cancelled worker",
+                    startTime = 1L,
+                    endTime = 2L,
+                    audioFilePath = audioFile.absolutePath
+                )
+            )
+            val worker = TestListenableWorkerBuilder<AiProcessingWorker>(app)
+                .setInputData(
+                    workDataOf(
+                        AiProcessingWorker.KEY_MEETING_ID to id,
+                        AiProcessingWorker.KEY_TASK_TYPE to AiProcessingWorker.TASK_TRANSCRIBE,
+                        AiProcessingWorker.KEY_GENERATION to 0L,
+                        AiProcessingWorker.KEY_CONFIG_REVISION to configRevision
+                    )
+                )
+                .build()
+
+            val thrown = runCatching { worker.doWork() }.exceptionOrNull()
+            assertTrue("Expected CancellationException, got $thrown", thrown is CancellationException)
+            assertNull(dao.getMeetingByIdDirect(id)!!.transcriptError)
+        } finally {
+            app.meetingRepository = previousRepository
+            audioFile.delete()
+        }
     }
 
     private fun discarded() = ListenableWorker.Result.success(workDataOf(AiProcessingWorker.KEY_DISCARDED to true))

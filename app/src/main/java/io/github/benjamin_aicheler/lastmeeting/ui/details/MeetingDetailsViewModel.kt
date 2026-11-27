@@ -14,6 +14,7 @@ import io.github.benjamin_aicheler.lastmeeting.repository.MeetingRepository
 import io.github.benjamin_aicheler.lastmeeting.util.ShareUtil
 import io.github.benjamin_aicheler.lastmeeting.worker.AiProcessingWorker
 import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskErrorCode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -112,6 +113,7 @@ class MeetingDetailsViewModel(
         savedStateHandle.getStateFlow("confirm_transcript_replacement", false)
 
     private var requestingTranscription = false
+    private var deletingMeeting = false
 
     init {
         observeWorkCompletion(
@@ -215,7 +217,7 @@ class MeetingDetailsViewModel(
     }
 
     private fun requestTranscription(replaceExisting: Boolean) {
-        if (requestingTranscription || isTranscribing.value || isProtocolizing.value) return
+        if (deletingMeeting || requestingTranscription || isTranscribing.value || isProtocolizing.value) return
         requestingTranscription = true
         viewModelScope.launch {
             try {
@@ -226,6 +228,7 @@ class MeetingDetailsViewModel(
                     return@launch
                 }
                 val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+                if (deletingMeeting) return@launch
                 AiProcessingWorker.enqueue(
                     app,
                     meetingId,
@@ -240,6 +243,7 @@ class MeetingDetailsViewModel(
     }
 
     fun protocolize() {
+        if (deletingMeeting) return
         viewModelScope.launch {
             val current = repository.getMeetingById(meetingId).first() ?: return@launch
             if (current.transcript.isNullOrBlank()) {
@@ -247,6 +251,7 @@ class MeetingDetailsViewModel(
                 return@launch
             }
             val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+            if (deletingMeeting) return@launch
             AiProcessingWorker.enqueue(
                 app,
                 meetingId,
@@ -346,13 +351,26 @@ class MeetingDetailsViewModel(
     }
 
     fun deleteMeeting() {
+        if (deletingMeeting) return
+        deletingMeeting = true
         viewModelScope.launch {
-            stopAudioPlayer()
-            val result = repository.deleteMeeting(meetingId)
-            if (result.isSuccess) {
-                _eventFlow.emit(DetailsUiEvent.MeetingDeleted)
-            } else {
-                _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_delete_failed)))
+            var deleted = false
+            try {
+                stopAudioPlayer()
+                val result = repository.deleteMeeting(meetingId)
+                if (result.isSuccess) {
+                    deleted = true
+                    AiProcessingWorker.cancelAllForMeeting(app, meetingId)
+                    _eventFlow.emit(DetailsUiEvent.MeetingDeleted)
+                } else {
+                    _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_delete_failed)))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } finally {
+                if (!deleted) {
+                    deletingMeeting = false
+                }
             }
         }
     }

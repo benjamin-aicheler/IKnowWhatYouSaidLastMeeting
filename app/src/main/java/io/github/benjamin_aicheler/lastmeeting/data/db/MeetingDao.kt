@@ -7,6 +7,11 @@ import androidx.room.Query
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
+data class TranscriptUpdateResult(
+    val updated: Boolean,
+    val supersededProtocolGeneration: Long? = null
+)
+
 @Dao
 interface MeetingDao {
 
@@ -44,6 +49,24 @@ interface MeetingDao {
         WHERE id = :id AND transcriptGeneration = :generation
     """)
     suspend fun updateTranscript(id: Long, transcript: String, generation: Long): Int
+
+    @Transaction
+    suspend fun updateTranscriptAndReportSupersededProtocol(
+        id: Long,
+        transcript: String,
+        generation: Long
+    ): TranscriptUpdateResult {
+        val before = getMeetingByIdDirect(id) ?: return TranscriptUpdateResult(updated = false)
+        if (before.transcriptGeneration != generation) {
+            return TranscriptUpdateResult(updated = false)
+        }
+        val changed = before.transcript != transcript
+        val rows = updateTranscript(id, transcript, generation)
+        return TranscriptUpdateResult(
+            updated = rows > 0,
+            supersededProtocolGeneration = if (rows > 0 && changed) before.protocolGeneration else null
+        )
+    }
 
     @Query("UPDATE meetings SET protocol = :protocol, protocolError = NULL WHERE id = :id AND protocolGeneration = :generation")
     suspend fun updateProtocol(id: Long, protocol: String, generation: Long): Int
