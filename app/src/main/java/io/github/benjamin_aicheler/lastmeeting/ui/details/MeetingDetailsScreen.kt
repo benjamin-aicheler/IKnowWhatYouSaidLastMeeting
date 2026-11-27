@@ -58,6 +58,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.ui.components.DeleteConfirmationDialog
 import io.github.benjamin_aicheler.lastmeeting.ui.theme.AppIcons
@@ -67,10 +69,12 @@ import io.github.benjamin_aicheler.lastmeeting.util.DateTimeFormatters
 @Composable
 fun MeetingDetailsScreen(
     viewModel: MeetingDetailsViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Boolean
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
     val meeting by viewModel.meeting.collectAsState()
     val isTranscribing by viewModel.isTranscribing.collectAsState()
     val isProtocolizing by viewModel.isProtocolizing.collectAsState()
@@ -79,6 +83,7 @@ fun MeetingDetailsScreen(
     val audioPositionMs by viewModel.audioPositionMs.collectAsState()
     val audioDurationMs by viewModel.audioDurationMs.collectAsState()
     val showTranscriptionConfirmation by viewModel.showTranscriptionConfirmation.collectAsState()
+    val pendingDeleteExit by viewModel.pendingDeleteExit.collectAsState()
 
     var showDeleteMeetingDialog by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
     var showDeleteTranscriptDialog by rememberSaveable(viewModel.meetingId) { mutableStateOf(false) }
@@ -134,8 +139,15 @@ fun MeetingDetailsScreen(
                 }
                 is DetailsUiEvent.MeetingDeleted -> {
                     Toast.makeText(context, resources.getString(R.string.msg_meeting_deleted), Toast.LENGTH_SHORT).show()
-                    onNavigateBack()
                 }
+            }
+        }
+    }
+
+    LaunchedEffect(pendingDeleteExit, lifecycleState) {
+        if (pendingDeleteExit && lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) {
+            if (onNavigateBack()) {
+                viewModel.consumePendingDeleteExit()
             }
         }
     }
@@ -145,7 +157,7 @@ fun MeetingDetailsScreen(
             TopAppBar(
                 title = { Text(text = stringResource(R.string.title_meeting_details)) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = { onNavigateBack() }) {
                         Icon(
                             imageVector = AppIcons.ArrowBack,
                             contentDescription = stringResource(R.string.action_back)

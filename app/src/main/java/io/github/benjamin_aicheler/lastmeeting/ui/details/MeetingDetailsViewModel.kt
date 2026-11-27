@@ -16,10 +16,12 @@ import io.github.benjamin_aicheler.lastmeeting.worker.AiProcessingWorker
 import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskErrorCode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -82,6 +84,13 @@ class MeetingDetailsViewModel(
 
     private val _eventFlow = MutableSharedFlow<DetailsUiEvent>()
     val eventFlow: SharedFlow<DetailsUiEvent> = _eventFlow.asSharedFlow()
+
+    private val _pendingDeleteExit = MutableStateFlow(false)
+    val pendingDeleteExit: StateFlow<Boolean> = _pendingDeleteExit.asStateFlow()
+
+    fun consumePendingDeleteExit() {
+        _pendingDeleteExit.value = false
+    }
 
     private val playbackController = AudioPlaybackController.create(
         context = app,
@@ -361,6 +370,7 @@ class MeetingDetailsViewModel(
                 if (result.isSuccess) {
                     deleted = true
                     AiProcessingWorker.cancelAllForMeeting(app, meetingId)
+                    _pendingDeleteExit.value = true
                     _eventFlow.emit(DetailsUiEvent.MeetingDeleted)
                 } else {
                     _eventFlow.emit(DetailsUiEvent.ShowToast(app.getString(R.string.msg_delete_failed)))
