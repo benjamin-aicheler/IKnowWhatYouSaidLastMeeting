@@ -15,10 +15,14 @@
     <string name="recording_stopping">Stopping recording…</string>
     <string name="msg_recording_start_failed">Could not start recording. Please try again while the app is open.</string>
     <string name="msg_recording_permission_required">Microphone permission is required to record. Please allow microphone access and try again.</string>
+    <string name="msg_recording_interrupted">Recording stopped unexpectedly due to an audio error. Any captured audio was saved and marked as damaged.</string>
+    <string name="notification_recording_interrupted_title">Recording interrupted</string>
     <string name="warning_recording_damaged">Recording may be damaged or incomplete</string>
     <string name="warning_recording_damaged_details">This recording did not finalize cleanly when stopped. The audio file may be truncated or unplayable, but you can still export, share, or delete it.</string>
     <string name="notification_channel_recording_name">Meeting Recording</string>
     <string name="notification_channel_recording_desc">Shows active meeting recording status</string>
+    <string name="notification_channel_recording_alert_name">Recording Alerts</string>
+    <string name="notification_channel_recording_alert_desc">Notifies if an active recording stops unexpectedly</string>
     <string name="notification_channel_ai_name">AI Processing</string>
     <string name="notification_channel_ai_desc">Shows transcription and protocol jobs that are still running</string>
     <string name="notification_channel_ai_completion_name">AI Results</string>

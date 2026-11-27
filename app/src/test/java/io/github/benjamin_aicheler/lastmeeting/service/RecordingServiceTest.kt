@@ -6,6 +6,7 @@ import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
+import android.media.MediaRecorder
 import android.os.Looper
 import io.github.benjamin_aicheler.lastmeeting.R
 import kotlinx.coroutines.CompletableDeferred
@@ -13,7 +14,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -322,6 +325,192 @@ class RecordingServiceTest {
         assertFalse(outputFile.exists())
     }
 
+    @Test
+    fun onDestroyTimeoutStillFinishesOriginalRowAndUnregistersLiveRecording() = runBlocking {
+        val insertEntered = CompletableDeferred<Unit>()
+        val allowInsert = CompletableDeferred<Unit>()
+        val store = FakeMeetingStore(
+            onStartMeeting = {
+                insertEntered.complete(Unit)
+                allowInsert.await()
+            }
+        )
+        val persistenceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = persistenceScope
+        service.destroyStopTimeoutMs = 50L
+
+        val outputFile = service.startRecording()
+        assertNotNull(outputFile)
+        withTimeout(5_000) { insertEntered.await() }
+
+        // Simulate service destruction timing out before the initial DB insert resolves.
+        controller.destroy()
+
+        assertEquals(1, recorder.stopCalls)
+        assertEquals(1, recorder.releaseCalls)
+        assertTrue(store.createdIds.isEmpty())
+        assertTrue(store.unregisteredPaths.isEmpty())
+
+        allowInsert.complete(Unit)
+        withTimeout(5_000) { store.unregisteredSignal.await() }
+
+        assertEquals(listOf(1L), store.finishedIds)
+        assertTrue(store.createdIds.isEmpty())
+        assertEquals(listOf(outputFile!!.absolutePath), store.unregisteredPaths)
+    }
+
+    @Test
+    fun failedStartInsertFallsBackToCreateMeetingOnceAndUnregisters() = runBlocking {
+        val store = FakeMeetingStore(failStartMeeting = true)
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+
+        val outputFile = service.startRecording()
+        assertNotNull(outputFile)
+
+        service.stopRecording()
+
+        assertEquals(listOf(1L), store.createdIds)
+        assertEquals(listOf(1L), store.finishedIds)
+        assertEquals(listOf(outputFile!!.absolutePath), store.unregisteredPaths)
+    }
+
+    @Test
+    @Config(sdk = [34])
+    fun runtimeRecorderErrorStopsRecordingMarksDamagedAndNotifiesWhenPermitted() = runBlocking {
+        shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val store = FakeMeetingStore()
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+
+        val outputFile = service.startRecording()
+        assertNotNull(outputFile)
+        assertTrue(service.isRecording.value)
+
+        recorder.triggerError(MediaRecorder.MEDIA_ERROR_SERVER_DIED, 100)
+        withTimeout(5_000) { store.unregisteredSignal.await() }
+
+        assertFalse(service.isRecording.value)
+        assertFalse(service.isStopping.value)
+        assertEquals(0L, service.elapsedTimeSeconds.value)
+        assertEquals(1, recorder.stopCalls)
+        assertEquals(1, recorder.releaseCalls)
+        assertEquals(1, recorder.clearErrorListenerCalls)
+        assertEquals(listOf(1L), store.finishedIds)
+        assertEquals(listOf(1L), store.damagedIds)
+        assertEquals(R.string.msg_recording_interrupted, service.runtimeError.value)
+        assertTrue(shadowOf(service).isForegroundStopped)
+        assertTrue(shadowOf(service).isStoppedBySelf)
+
+        val notifications = service.getSystemService(NotificationManager::class.java).activeNotifications
+        val alertNotification = notifications.single { it.id == RecordingService.ALERT_NOTIFICATION_ID }.notification
+        assertEquals(
+            service.getString(R.string.notification_recording_interrupted_title),
+            alertNotification.extras.getString(Notification.EXTRA_TITLE)
+        )
+    }
+
+    @Test
+    @Config(sdk = [34])
+    fun runtimeRecorderErrorWithoutNotificationPermissionStillFinalizesAndSetsRuntimeError() = runBlocking {
+        shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val store = FakeMeetingStore()
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+
+        service.startRecording()
+        recorder.triggerError(MediaRecorder.MEDIA_RECORDER_ERROR_UNKNOWN, 1)
+        withTimeout(5_000) { store.unregisteredSignal.await() }
+
+        assertEquals(listOf(1L), store.damagedIds)
+        assertEquals(R.string.msg_recording_interrupted, service.runtimeError.value)
+        assertTrue(service.getSystemService(NotificationManager::class.java).activeNotifications.isEmpty())
+    }
+
+    @Test
+    fun runtimeRecorderErrorWithEmptyOutputDiscardsRowAndDeletesEmptyFile() = runBlocking {
+        val store = FakeMeetingStore()
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+        recorder = FakeRecorder(writeEmptyOutput = true)
+
+        val outputFile = service.startRecording()
+        assertNotNull(outputFile)
+
+        recorder.triggerError(MediaRecorder.MEDIA_ERROR_SERVER_DIED, 0)
+        withTimeout(5_000) { store.unregisteredSignal.await() }
+
+        assertEquals(listOf(1L), store.discardedIds)
+        assertTrue(store.finishedIds.isEmpty())
+        assertFalse(outputFile!!.exists())
+        assertEquals(R.string.msg_recording_interrupted, service.runtimeError.value)
+    }
+
+    @Test
+    fun runtimeErrorRacingManualStopFinalizesAndReleasesOnce() = runBlocking {
+        val store = FakeMeetingStore()
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+        val stopEntered = CountDownLatch(1)
+        val allowStopFinish = CountDownLatch(1)
+        recorder = FakeRecorder(
+            onStop = {
+                stopEntered.countDown()
+                check(allowStopFinish.await(5, TimeUnit.SECONDS))
+            }
+        )
+
+        val outputFile = service.startRecording()
+        assertNotNull(outputFile)
+
+        val manualStop = async(Dispatchers.Default) { service.stopRecording() }
+        assertTrue(stopEntered.await(5, TimeUnit.SECONDS))
+
+        // Error arrives while manual stop is already finalizing.
+        recorder.triggerError(MediaRecorder.MEDIA_ERROR_SERVER_DIED, 0)
+        allowStopFinish.countDown()
+        assertEquals(outputFile, manualStop.await())
+
+        assertEquals(1, recorder.stopCalls)
+        assertEquals(1, recorder.releaseCalls)
+        assertEquals(listOf(1L), store.finishedIds)
+        assertTrue(store.damagedIds.isEmpty())
+        assertNull(service.runtimeError.value)
+    }
+
+    @Test
+    fun staleErrorCallbackFromReleasedSessionDoesNotStopNextRecording() = runBlocking {
+        val store = FakeMeetingStore()
+        service.meetingStoreOverride = store
+        service.persistenceScopeOverride = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
+
+        val recorderA = FakeRecorder(preserveListenerOnClear = true)
+        val recorderB = FakeRecorder()
+        val recorders = ArrayDeque(listOf(recorderA, recorderB))
+        service.recorderFactory = { recorders.removeFirst() }
+
+        service.startRecording()
+        service.stopRecording()
+        assertEquals(1, recorderA.clearErrorListenerCalls)
+
+        val fileB = service.startRecording()
+        assertNotNull(fileB)
+        assertTrue(service.isRecording.value)
+
+        // Simulate a late native callback from recorderA arriving during session B.
+        recorderA.triggerError(MediaRecorder.MEDIA_ERROR_SERVER_DIED, 99)
+        delay(50)
+
+        assertTrue(service.isRecording.value)
+        assertEquals(0, recorderB.stopCalls)
+        assertNull(service.runtimeError.value)
+
+        assertEquals(fileB, service.stopRecording())
+        assertEquals(listOf(1L, 2L), store.finishedIds)
+    }
+
     private fun assertStartupFailure(stage: String) {
         recorder.failAt = stage
         startCommand()
@@ -351,7 +540,8 @@ class RecordingServiceTest {
 
     private class FakeRecorder(
         private val onStop: (() -> Unit)? = null,
-        private val writeEmptyOutput: Boolean = false
+        private val writeEmptyOutput: Boolean = false,
+        private val preserveListenerOnClear: Boolean = false
     ) : AudioRecorder {
         var failAt: String? = null
         var failRelease = false
@@ -359,6 +549,23 @@ class RecordingServiceTest {
         var releaseCalls = 0
         var startCalls = 0
         var stopCalls = 0
+        var clearErrorListenerCalls = 0
+        private var errorListener: ((Int, Int) -> Unit)? = null
+
+        override fun setOnErrorListener(listener: ((what: Int, extra: Int) -> Unit)?) {
+            if (listener == null) {
+                clearErrorListenerCalls++
+                if (!preserveListenerOnClear) {
+                    errorListener = null
+                }
+            } else {
+                errorListener = listener
+            }
+        }
+
+        fun triggerError(what: Int, extra: Int) {
+            errorListener?.invoke(what, extra)
+        }
 
         override fun configure(outputFile: File) {
             this.outputFile = outputFile
@@ -390,14 +597,27 @@ class RecordingServiceTest {
         }
     }
 
-    private class FakeMeetingStore : MeetingSessionStore {
+    private class FakeMeetingStore(
+        private val onStartMeeting: (suspend () -> Unit)? = null,
+        private val failStartMeeting: Boolean = false
+    ) : MeetingSessionStore {
         private var nextId = 1L
         val startedPaths: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        val createdIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
         val finishedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
         val damagedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
         val discardedIds: MutableList<Long> = Collections.synchronizedList(mutableListOf())
+        val unregisteredPaths: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        val unregisteredSignal = CompletableDeferred<Unit>()
+
+        override fun unregisterLiveRecording(audioFile: File) {
+            unregisteredPaths.add(audioFile.absolutePath)
+            unregisteredSignal.complete(Unit)
+        }
 
         override suspend fun startMeeting(audioFile: File, startTime: Long): Long {
+            onStartMeeting?.invoke()
+            if (failStartMeeting) throw IOException("DB insert failed")
             startedPaths.add(audioFile.absolutePath)
             return nextId++
         }
@@ -412,6 +632,7 @@ class RecordingServiceTest {
         override suspend fun createMeeting(audioFile: File, startTime: Long, endTime: Long, isDamaged: Boolean): Long {
             startedPaths.add(audioFile.absolutePath)
             val id = nextId++
+            createdIds.add(id)
             finishedIds.add(id)
             if (isDamaged) {
                 damagedIds.add(id)
