@@ -2,6 +2,8 @@ package io.github.benjamin_aicheler.lastmeeting.ui.settings
 
 import android.app.Application
 import android.os.Looper
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.lifecycle.ViewModelStore
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
@@ -218,6 +220,70 @@ class SettingsViewModelDraftTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(2, store.saveCount)
         assertEquals("gpt-4.1-mini", viewModel.uiState.value.baseline?.protocolModel)
+        assertFalse(viewModel.uiState.value.hasUnsavedChanges)
+    }
+
+    @Test
+    fun apiKeyStateSyncsOnLoadAndDirectEditsDriveDirtyCheckTestAndSave() = runBlocking {
+        val capturedAuthHeader = CompletableDeferred<String?>()
+        val store = FakeSettingsStore()
+        val viewModel = SettingsViewModel(
+            app = app,
+            repository = store,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                    capturedAuthHeader.complete(chain.request().header("Authorization"))
+                    Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(200)
+                        .message("OK")
+                        .body("""{"data":[{"id":"gpt-4o"}]}""".toResponseBody("application/json".toMediaType()))
+                        .build()
+                }).build()
+            )
+        ).also { viewModelStore.put("apikey-state-sync", it) }
+
+        // Before DataStore emits, apiKeyState starts empty.
+        assertEquals("", viewModel.apiKeyState.text.toString())
+
+        // Baseline load populates apiKeyState without marking dirty.
+        store.emit(initialSettings())
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("sk-initial", viewModel.apiKeyState.text.toString())
+        assertFalse(viewModel.uiState.value.hasUnsavedChanges)
+
+        // Direct TextFieldState edits mark the draft dirty and flow into testConnection + save.
+        viewModel.apiKeyState.setTextAndPlaceCursorAtEnd("sk-typed-secret")
+        // Unit tests run without Compose UI's GlobalSnapshotManager frame loop.
+        Snapshot.sendApplyNotifications()
+        withTimeout(2_000) {
+            while (!viewModel.uiState.value.hasUnsavedChanges) {
+                shadowOf(Looper.getMainLooper()).idle()
+                delay(10)
+            }
+        }
+        assertEquals("sk-typed-secret", viewModel.uiState.value.draft.apiKey)
+
+        viewModel.testConnection()
+        val authHeader = withTimeout(2_000) {
+            while (!capturedAuthHeader.isCompleted || viewModel.uiState.value.isTestingConnection) {
+                shadowOf(Looper.getMainLooper()).idle()
+                delay(10)
+            }
+            capturedAuthHeader.await()
+        }
+        assertEquals("Bearer sk-typed-secret", authHeader)
+
+        viewModel.saveSettings()
+        withTimeout(2_000) {
+            while (store.saveCount < 1 || viewModel.uiState.value.isSaving) {
+                shadowOf(Looper.getMainLooper()).idle()
+                delay(10)
+            }
+        }
+        assertEquals("sk-typed-secret", viewModel.uiState.value.baseline?.apiKey)
+        assertEquals("sk-typed-secret", viewModel.apiKeyState.text.toString())
         assertFalse(viewModel.uiState.value.hasUnsavedChanges)
     }
 

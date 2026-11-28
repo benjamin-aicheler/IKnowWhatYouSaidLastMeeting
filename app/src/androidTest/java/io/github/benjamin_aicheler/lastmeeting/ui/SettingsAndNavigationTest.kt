@@ -58,7 +58,7 @@ class SettingsAndNavigationTest {
             compose.onAllNodesWithText(app.getString(R.string.label_api_base_url)).fetchSemanticsNodes().isNotEmpty()
         }
 
-        val apiKeyFieldMatcher = SemanticsMatcher.keyIsDefined(SemanticsProperties.Password)
+        val apiKeyFieldMatcher = SemanticsMatcher.expectValue(SemanticsProperties.IsPasswordObfuscated, true)
         compose.onNodeWithText(app.getString(R.string.label_api_base_url))
             .performScrollTo()
             .performTextReplacement("https://draft.example/v1/")

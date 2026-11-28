@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -24,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -41,8 +43,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
@@ -140,12 +140,15 @@ fun SettingsScreen(
                 singleLine = true
             )
 
-            OutlinedTextField(
-                value = draft.apiKey,
-                onValueChange = viewModel::onApiKeyChanged,
+            OutlinedSecureTextField(
+                state = viewModel.apiKeyState,
                 enabled = uiState.isLoaded,
                 label = { Text(stringResource(R.string.label_api_key)) },
-                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                textObfuscationMode = if (showApiKey) {
+                    TextObfuscationMode.Visible
+                } else {
+                    TextObfuscationMode.Hidden
+                },
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
                     autoCorrectEnabled = false
@@ -163,8 +166,7 @@ fun SettingsScreen(
                         )
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                modifier = Modifier.fillMaxWidth()
             )
 
             ExposedDropdownMenuBox(
