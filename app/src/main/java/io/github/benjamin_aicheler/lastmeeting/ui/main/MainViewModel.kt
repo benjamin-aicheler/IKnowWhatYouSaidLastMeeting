@@ -76,6 +76,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var isStoppingCollectorJob: Job? = null
     private var elapsedCollectorJob: Job? = null
     private var errorCollectorJob: Job? = null
+    private var runtimeErrorCollectorJob: Job? = null
     private var bindingRequested = false
 
     private val _recordingError = MutableStateFlow<Int?>(null)
@@ -123,6 +124,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Release the binding even when foreground promotion itself failed.
                 unbindRecordingService()
             }
+
+            runtimeErrorCollectorJob?.cancel()
+            runtimeErrorCollectorJob = viewModelScope.launch {
+                srv.runtimeError.filterNotNull().collect { error ->
+                    srv.clearRuntimeError()
+                    _recordingError.value = error
+                }
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -130,6 +139,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             isStoppingCollectorJob?.cancel()
             elapsedCollectorJob?.cancel()
             errorCollectorJob?.cancel()
+            runtimeErrorCollectorJob?.cancel()
             recordingService = null
             _isRecording.value = false
             _isStopping.value = false
@@ -159,6 +169,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isStoppingCollectorJob?.cancel()
         elapsedCollectorJob?.cancel()
         errorCollectorJob?.cancel()
+        runtimeErrorCollectorJob?.cancel()
         recordingService = null
         _isRecording.value = false
         _isStopping.value = false

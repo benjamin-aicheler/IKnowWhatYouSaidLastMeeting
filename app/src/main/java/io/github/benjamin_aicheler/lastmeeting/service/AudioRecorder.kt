@@ -7,6 +7,7 @@ import java.io.File
 
 /** Owns one recorder, including instances whose configuration or startup fails. */
 internal interface AudioRecorder {
+    fun setOnErrorListener(listener: ((what: Int, extra: Int) -> Unit)?) {}
     fun configure(outputFile: File)
     fun prepare()
     fun start()
@@ -20,6 +21,16 @@ internal class AndroidAudioRecorder(context: Context) : AudioRecorder {
     } else {
         @Suppress("DEPRECATION")
         MediaRecorder()
+    }
+
+    override fun setOnErrorListener(listener: ((what: Int, extra: Int) -> Unit)?) {
+        if (listener == null) {
+            recorder.setOnErrorListener(null)
+        } else {
+            recorder.setOnErrorListener { _, what, extra ->
+                listener(what, extra)
+            }
+        }
     }
 
     override fun configure(outputFile: File) {
