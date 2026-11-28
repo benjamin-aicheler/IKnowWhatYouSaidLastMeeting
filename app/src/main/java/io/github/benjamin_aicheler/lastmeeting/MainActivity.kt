@@ -7,11 +7,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -64,15 +67,15 @@ fun LastMeetingNavApp() {
         navController = navController,
         startDestination = "main"
     ) {
-        composable("main") {
+        composable("main") { backStackEntry ->
             val viewModel: MainViewModel = viewModel()
             MainScreen(
                 viewModel = viewModel,
                 onNavigateToDetails = { id ->
-                    navController.navigate("details/$id")
+                    navController.navigateFromIfCurrentAndResumed(backStackEntry, "details/$id")
                 },
                 onNavigateToSettings = {
-                    navController.navigate("settings")
+                    navController.navigateFromIfCurrentAndResumed(backStackEntry, "settings")
                 }
             )
         }
@@ -88,16 +91,37 @@ fun LastMeetingNavApp() {
 
             MeetingDetailsScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUpFromEntry(backStackEntry) }
             )
         }
 
-        composable("settings") {
+        composable("settings") { backStackEntry ->
             val viewModel: SettingsViewModel = viewModel()
             SettingsScreen(
                 viewModel = viewModel,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.navigateUpFromEntry(backStackEntry) }
             )
         }
     }
+}
+
+internal fun NavHostController.navigateFromIfCurrentAndResumed(
+    sourceEntry: NavBackStackEntry,
+    route: String
+): Boolean {
+    if (currentBackStackEntry?.id != sourceEntry.id) return false
+    if (!sourceEntry.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return false
+    navigate(route) {
+        launchSingleTop = true
+    }
+    return true
+}
+
+internal fun NavHostController.navigateUpFromEntry(
+    sourceEntry: NavBackStackEntry
+): Boolean {
+    if (currentBackStackEntry?.id != sourceEntry.id) return false
+    if (!sourceEntry.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return false
+    if (previousBackStackEntry == null) return false
+    return navigateUp()
 }

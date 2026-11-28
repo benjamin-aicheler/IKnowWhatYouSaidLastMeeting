@@ -46,8 +46,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
-import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
-import io.github.benjamin_aicheler.lastmeeting.data.preferences.ApiSettings
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
 import io.github.benjamin_aicheler.lastmeeting.ui.theme.AppIcons
 
@@ -58,70 +56,31 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val settings by viewModel.settings.collectAsState()
-    val isLoaded by viewModel.isLoaded.collectAsState()
-    val isTestingConnection by viewModel.isTestingConnection.collectAsState()
-    val lastSavedSettings by viewModel.lastSavedSettings.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
+    val draft = uiState.draft
 
-    var baseline by remember { mutableStateOf<ApiSettings?>(null) }
-    var baseUrl by remember { mutableStateOf(settings.baseUrl) }
-    var apiKey by remember { mutableStateOf(settings.apiKey) }
+    // Ephemeral UI-only state: re-masks the API key after configuration changes.
     var showApiKey by remember { mutableStateOf(false) }
-    var transcriptionMode by remember { mutableStateOf(settings.transcriptionMode) }
     var showModeMenu by remember { mutableStateOf(false) }
-    var transcriptionModel by remember { mutableStateOf(settings.transcriptionModel) }
-    var protocolModel by remember { mutableStateOf(settings.protocolModel) }
-    var transcriptionPrompt by remember { mutableStateOf(settings.transcriptionPrompt) }
-    var protocolPrompt by remember { mutableStateOf(settings.protocolPrompt) }
-    var showDiscardDialog by remember { mutableStateOf(false) }
     val defaultTranscriptionPrompt = stringResource(R.string.default_transcription_prompt)
     val defaultProtocolPrompt = stringResource(R.string.default_protocol_prompt)
 
-    val hasUnsavedChanges = baseline?.let { saved ->
-        baseUrl.trim() != saved.baseUrl.trim() ||
-            apiKey.trim() != saved.apiKey.trim() ||
-            transcriptionMode != saved.transcriptionMode ||
-            transcriptionModel.trim() != saved.transcriptionModel.trim() ||
-            protocolModel.trim() != saved.protocolModel.trim() ||
-            transcriptionPrompt.trim() != saved.transcriptionPrompt.trim() ||
-            protocolPrompt.trim() != saved.protocolPrompt.trim()
-    } ?: false
-
-    fun applyBaseline(target: ApiSettings) {
-        baseline = target
-        baseUrl = target.baseUrl
-        apiKey = target.apiKey
-        transcriptionMode = target.transcriptionMode
-        transcriptionModel = target.transcriptionModel
-        protocolModel = target.protocolModel
-        transcriptionPrompt = target.transcriptionPrompt
-        protocolPrompt = target.protocolPrompt
-    }
-
-    LaunchedEffect(isLoaded, settings) {
-        if (isLoaded && (baseline == null || !hasUnsavedChanges)) {
-            applyBaseline(settings)
+    LaunchedEffect(uiState.isLoaded) {
+        if (!uiState.isLoaded) {
+            showModeMenu = false
         }
     }
-
-    LaunchedEffect(lastSavedSettings) {
-        lastSavedSettings?.second?.let { saved ->
-            applyBaseline(saved)
-        }
-    }
-
-    val urlValidation = remember(baseUrl) { OpenAiApiClient.validateBaseUrl(baseUrl) }
 
     fun handleBackPress() {
-        if (hasUnsavedChanges) {
-            showDiscardDialog = true
+        if (uiState.hasUnsavedChanges) {
+            viewModel.requestDiscardDialog()
         } else {
             onNavigateBack()
         }
     }
 
-    BackHandler(enabled = hasUnsavedChanges) {
-        showDiscardDialog = true
+    BackHandler(enabled = uiState.hasUnsavedChanges) {
+        viewModel.requestDiscardDialog()
     }
 
     LaunchedEffect(Unit) {
@@ -154,12 +113,13 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             OutlinedTextField(
-                value = baseUrl,
-                onValueChange = { baseUrl = it },
+                value = draft.baseUrl,
+                onValueChange = viewModel::onBaseUrlChanged,
+                enabled = uiState.isLoaded,
                 label = { Text(stringResource(R.string.label_api_base_url)) },
-                isError = urlValidation !is BaseUrlValidationResult.Valid,
-                supportingText = when (urlValidation) {
-                    is BaseUrlValidationResult.Valid -> if (urlValidation.isPlainHttp) {
+                isError = uiState.isLoaded && uiState.urlValidation !is BaseUrlValidationResult.Valid,
+                supportingText = when (val validation = uiState.urlValidation) {
+                    is BaseUrlValidationResult.Valid -> if (uiState.isLoaded && validation.isPlainHttp) {
                         {
                             Text(
                                 text = stringResource(R.string.warning_plain_http_base_url),
@@ -181,8 +141,9 @@ fun SettingsScreen(
             )
 
             OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it },
+                value = draft.apiKey,
+                onValueChange = viewModel::onApiKeyChanged,
+                enabled = uiState.isLoaded,
                 label = { Text(stringResource(R.string.label_api_key)) },
                 visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
@@ -190,7 +151,10 @@ fun SettingsScreen(
                     autoCorrectEnabled = false
                 ),
                 trailingIcon = {
-                    IconButton(onClick = { showApiKey = !showApiKey }) {
+                    IconButton(
+                        onClick = { showApiKey = !showApiKey },
+                        enabled = uiState.isLoaded
+                    ) {
                         Icon(
                             imageVector = if (showApiKey) AppIcons.VisibilityOff else AppIcons.Visibility,
                             contentDescription = stringResource(
@@ -204,31 +168,36 @@ fun SettingsScreen(
             )
 
             ExposedDropdownMenuBox(
-                expanded = showModeMenu,
-                onExpandedChange = { showModeMenu = !showModeMenu }
+                expanded = uiState.isLoaded && showModeMenu,
+                onExpandedChange = {
+                    if (uiState.isLoaded) {
+                        showModeMenu = !showModeMenu
+                    }
+                }
             ) {
                 OutlinedTextField(
-                    value = stringResource(transcriptionModeLabelRes(transcriptionMode)),
+                    value = stringResource(transcriptionModeLabelRes(draft.transcriptionMode)),
                     onValueChange = {},
                     readOnly = true,
+                    enabled = uiState.isLoaded,
                     label = { Text(stringResource(R.string.label_transcription_mode)) },
                     supportingText = { Text(stringResource(R.string.helper_transcription_mode)) },
                     trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = showModeMenu)
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = uiState.isLoaded && showModeMenu)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
                         .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 )
                 ExposedDropdownMenu(
-                    expanded = showModeMenu,
+                    expanded = uiState.isLoaded && showModeMenu,
                     onDismissRequest = { showModeMenu = false }
                 ) {
                     TranscriptionMode.entries.forEach { mode ->
                         DropdownMenuItem(
                             text = { Text(stringResource(transcriptionModeLabelRes(mode))) },
                             onClick = {
-                                transcriptionMode = mode
+                                viewModel.onTranscriptionModeChanged(mode)
                                 showModeMenu = false
                             }
                         )
@@ -237,16 +206,18 @@ fun SettingsScreen(
             }
 
             OutlinedTextField(
-                value = transcriptionModel,
-                onValueChange = { transcriptionModel = it },
+                value = draft.transcriptionModel,
+                onValueChange = viewModel::onTranscriptionModelChanged,
+                enabled = uiState.isLoaded,
                 label = { Text(stringResource(R.string.label_transcription_model)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
 
             OutlinedTextField(
-                value = protocolModel,
-                onValueChange = { protocolModel = it },
+                value = draft.protocolModel,
+                onValueChange = viewModel::onProtocolModelChanged,
+                enabled = uiState.isLoaded,
                 label = { Text(stringResource(R.string.label_protocol_model)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
@@ -254,8 +225,9 @@ fun SettingsScreen(
 
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
-                    value = transcriptionPrompt,
-                    onValueChange = { transcriptionPrompt = it },
+                    value = draft.transcriptionPrompt,
+                    onValueChange = viewModel::onTranscriptionPromptChanged,
+                    enabled = uiState.isLoaded,
                     label = { Text(stringResource(R.string.label_transcription_prompt)) },
                     supportingText = { Text(stringResource(R.string.helper_transcription_prompt)) },
                     modifier = Modifier.fillMaxWidth(),
@@ -263,8 +235,8 @@ fun SettingsScreen(
                     maxLines = 6
                 )
                 TextButton(
-                    onClick = { transcriptionPrompt = defaultTranscriptionPrompt },
-                    enabled = transcriptionPrompt.trim() != defaultTranscriptionPrompt.trim(),
+                    onClick = { viewModel.resetTranscriptionPromptToDefault(defaultTranscriptionPrompt) },
+                    enabled = uiState.isLoaded && draft.transcriptionPrompt.trim() != defaultTranscriptionPrompt.trim(),
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Text(stringResource(R.string.action_reset_prompt_default))
@@ -273,16 +245,17 @@ fun SettingsScreen(
 
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
-                    value = protocolPrompt,
-                    onValueChange = { protocolPrompt = it },
+                    value = draft.protocolPrompt,
+                    onValueChange = viewModel::onProtocolPromptChanged,
+                    enabled = uiState.isLoaded,
                     label = { Text(stringResource(R.string.label_protocol_prompt)) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3,
                     maxLines = 6
                 )
                 TextButton(
-                    onClick = { protocolPrompt = defaultProtocolPrompt },
-                    enabled = protocolPrompt.trim() != defaultProtocolPrompt.trim(),
+                    onClick = { viewModel.resetProtocolPromptToDefault(defaultProtocolPrompt) },
+                    enabled = uiState.isLoaded && draft.protocolPrompt.trim() != defaultProtocolPrompt.trim(),
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Text(stringResource(R.string.action_reset_prompt_default))
@@ -292,13 +265,13 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedButton(
-                onClick = { viewModel.testConnection(baseUrl = baseUrl, apiKey = apiKey) },
-                enabled = !isTestingConnection,
+                onClick = viewModel::testConnection,
+                enabled = uiState.canTestConnection,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = stringResource(
-                        if (isTestingConnection) {
+                        if (uiState.isTestingConnection) {
                             R.string.msg_testing_connection
                         } else {
                             R.string.action_test_connection
@@ -308,17 +281,8 @@ fun SettingsScreen(
             }
 
             Button(
-                onClick = {
-                    viewModel.saveSettings(
-                        baseUrl = baseUrl,
-                        apiKey = apiKey,
-                        transcriptionMode = transcriptionMode,
-                        transcriptionModel = transcriptionModel,
-                        protocolModel = protocolModel,
-                        transcriptionPrompt = transcriptionPrompt,
-                        protocolPrompt = protocolPrompt
-                    )
-                },
+                onClick = viewModel::saveSettings,
+                enabled = uiState.canSave,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(text = stringResource(R.string.action_save_settings))
@@ -326,15 +290,15 @@ fun SettingsScreen(
         }
     }
 
-    if (showDiscardDialog) {
+    if (uiState.showDiscardDialog) {
         AlertDialog(
-            onDismissRequest = { showDiscardDialog = false },
+            onDismissRequest = viewModel::dismissDiscardDialog,
             title = { Text(stringResource(R.string.confirm_discard_settings_title)) },
             text = { Text(stringResource(R.string.confirm_discard_settings_message)) },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showDiscardDialog = false
+                        viewModel.dismissDiscardDialog()
                         onNavigateBack()
                     }
                 ) {
@@ -342,7 +306,7 @@ fun SettingsScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDiscardDialog = false }) {
+                TextButton(onClick = viewModel::dismissDiscardDialog) {
                     Text(stringResource(R.string.action_cancel))
                 }
             }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -823,6 +824,11 @@ class OpenAiApiClientTest {
                 job.cancel()
                 val thrown = runCatching { withTimeout(5_000) { job.await() } }.exceptionOrNull()
                 assertTrue("Expected CancellationException, got $thrown", thrown is CancellationException)
+                withTimeout(2_000) {
+                    while (okHttp.dispatcher.runningCallsCount() + okHttp.dispatcher.queuedCallsCount() > 0) {
+                        delay(10)
+                    }
+                }
                 assertEquals(0, okHttp.dispatcher.runningCallsCount() + okHttp.dispatcher.queuedCallsCount())
             } finally {
                 releaseServer.countDown()

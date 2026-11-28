@@ -44,10 +44,22 @@ interface SettingsProvider {
     val settingsFlow: Flow<ApiSettings>
 }
 
+internal interface SettingsStore : SettingsProvider {
+    suspend fun saveSettings(
+        baseUrl: String,
+        apiKey: String,
+        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO,
+        transcriptionModel: String,
+        protocolModel: String,
+        transcriptionPrompt: String,
+        protocolPrompt: String
+    )
+}
+
 class SettingsRepository internal constructor(
     private val context: Context,
     private val dataStore: DataStore<Preferences>
-) : SettingsProvider {
+) : SettingsStore {
 
     constructor(context: Context) : this(context, context.dataStore)
 
@@ -129,10 +141,10 @@ class SettingsRepository internal constructor(
         )
     }
 
-    suspend fun saveSettings(
+    override suspend fun saveSettings(
         baseUrl: String,
         apiKey: String,
-        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO,
+        transcriptionMode: TranscriptionMode,
         transcriptionModel: String,
         protocolModel: String,
         transcriptionPrompt: String,

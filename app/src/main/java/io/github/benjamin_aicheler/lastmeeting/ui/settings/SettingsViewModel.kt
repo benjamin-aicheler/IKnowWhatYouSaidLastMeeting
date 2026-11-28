@@ -13,116 +13,221 @@ import io.github.benjamin_aicheler.lastmeeting.data.api.UnexpectedModelsResponse
 import io.github.benjamin_aicheler.lastmeeting.data.api.UnsupportedModelsEndpointException
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.ApiSettings
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
+import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsStore
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
 
-class SettingsViewModel(application: Application) : AndroidViewModel(application) {
+data class SettingsDraft(
+    val baseUrl: String = SettingsRepository.DEFAULT_BASE_URL,
+    val apiKey: String = "",
+    val transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO,
+    val transcriptionModel: String = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+    val protocolModel: String = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+    val transcriptionPrompt: String = "",
+    val protocolPrompt: String = ""
+)
 
-    private val app = application as LastMeetingApp
-    private val repository = app.settingsRepository
-    private val apiClient = OpenAiApiClient()
-    private var saveCounter = 0
+data class SettingsUiState(
+    val isLoaded: Boolean = false,
+    val baseline: ApiSettings? = null,
+    val draft: SettingsDraft = SettingsDraft(),
+    val urlValidation: BaseUrlValidationResult = OpenAiApiClient.validateBaseUrl(SettingsRepository.DEFAULT_BASE_URL),
+    val isTestingConnection: Boolean = false,
+    val isSaving: Boolean = false,
+    val showDiscardDialog: Boolean = false
+) {
+    val hasUnsavedChanges: Boolean
+        get() = isLoaded && baseline?.let { saved ->
+            draft.baseUrl.trim() != saved.baseUrl.trim() ||
+                draft.apiKey.trim() != saved.apiKey.trim() ||
+                draft.transcriptionMode != saved.transcriptionMode ||
+                draft.transcriptionModel.trim() != saved.transcriptionModel.trim() ||
+                draft.protocolModel.trim() != saved.protocolModel.trim() ||
+                draft.transcriptionPrompt.trim() != saved.transcriptionPrompt.trim() ||
+                draft.protocolPrompt.trim() != saved.protocolPrompt.trim()
+        } ?: false
 
-    val settings: StateFlow<ApiSettings> = repository.settingsFlow.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = ApiSettings(
-            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
-            apiKey = "",
-            transcriptionMode = TranscriptionMode.AUTO,
-            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
-            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
-            transcriptionPrompt = "",
-            protocolPrompt = ""
-        )
+    val canTestConnection: Boolean
+        get() = isLoaded && !isTestingConnection && urlValidation is BaseUrlValidationResult.Valid
+
+    val canSave: Boolean
+        get() = isLoaded && !isSaving && urlValidation is BaseUrlValidationResult.Valid
+}
+
+class SettingsViewModel internal constructor(
+    private val app: Application,
+    private val repository: SettingsStore,
+    private val apiClient: OpenAiApiClient
+) : AndroidViewModel(app) {
+
+    constructor(application: Application) : this(
+        app = application,
+        repository = (application as LastMeetingApp).settingsRepository,
+        apiClient = OpenAiApiClient()
     )
 
-    val isLoaded: StateFlow<Boolean> = repository.settingsFlow
-        .map { true }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = false
-        )
+    private var editVersion = 0L
 
-    private val _isTestingConnection = MutableStateFlow(false)
-    val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
-
-    private val _lastSavedSettings = MutableStateFlow<Pair<Int, ApiSettings>?>(null)
-    val lastSavedSettings: StateFlow<Pair<Int, ApiSettings>?> = _lastSavedSettings.asStateFlow()
+    private val _uiState = MutableStateFlow(SettingsUiState())
+    val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     private val _messageFlow = MutableSharedFlow<String>()
     val messageFlow: SharedFlow<String> = _messageFlow.asSharedFlow()
 
-    fun saveSettings(
-        baseUrl: String,
-        apiKey: String,
-        transcriptionMode: TranscriptionMode = TranscriptionMode.AUTO,
-        transcriptionModel: String,
-        protocolModel: String,
-        transcriptionPrompt: String,
-        protocolPrompt: String
-    ) {
+    init {
         viewModelScope.launch {
-            val validatedUrl = when (val result = OpenAiApiClient.validateBaseUrl(baseUrl)) {
-                is BaseUrlValidationResult.Valid -> result.normalizedUrl
-                BaseUrlValidationResult.InvalidSchemeOrHost -> {
-                    _messageFlow.emit(app.getString(R.string.error_invalid_base_url))
-                    return@launch
-                }
-                BaseUrlValidationResult.ContainsCredentialsOrQuery -> {
-                    _messageFlow.emit(app.getString(R.string.error_base_url_credentials_or_query))
-                    return@launch
+            repository.settingsFlow.collect { persisted ->
+                _uiState.update { current ->
+                    if (!current.isLoaded || (!current.hasUnsavedChanges && !current.isSaving)) {
+                        current.copy(
+                            isLoaded = true,
+                            baseline = persisted,
+                            draft = persisted.toDraft(),
+                            urlValidation = OpenAiApiClient.validateBaseUrl(persisted.baseUrl)
+                        )
+                    } else {
+                        current.copy(isLoaded = true, baseline = persisted)
+                    }
                 }
             }
-
-            repository.saveSettings(
-                baseUrl = validatedUrl,
-                apiKey = apiKey,
-                transcriptionMode = transcriptionMode,
-                transcriptionModel = transcriptionModel,
-                protocolModel = protocolModel,
-                transcriptionPrompt = transcriptionPrompt,
-                protocolPrompt = protocolPrompt
-            )
-            _lastSavedSettings.value = (++saveCounter) to repository.settingsFlow.first()
-            _messageFlow.emit(app.getString(R.string.msg_settings_saved))
         }
     }
 
-    fun testConnection(baseUrl: String, apiKey: String) {
-        if (_isTestingConnection.value) return
-        viewModelScope.launch {
-            val validatedUrl = when (val result = OpenAiApiClient.validateBaseUrl(baseUrl)) {
-                is BaseUrlValidationResult.Valid -> result.normalizedUrl
-                BaseUrlValidationResult.InvalidSchemeOrHost -> {
-                    _messageFlow.emit(app.getString(R.string.error_invalid_base_url))
-                    return@launch
-                }
-                BaseUrlValidationResult.ContainsCredentialsOrQuery -> {
-                    _messageFlow.emit(app.getString(R.string.error_base_url_credentials_or_query))
-                    return@launch
-                }
-            }
-            if (apiKey.isBlank()) {
-                _messageFlow.emit(app.getString(R.string.msg_missing_api_key))
-                return@launch
-            }
+    fun onBaseUrlChanged(value: String) = updateDraft { it.copy(baseUrl = value) }
 
-            _isTestingConnection.value = true
+    fun onApiKeyChanged(value: String) = updateDraft { it.copy(apiKey = value) }
+
+    fun onTranscriptionModeChanged(mode: TranscriptionMode) = updateDraft { it.copy(transcriptionMode = mode) }
+
+    fun onTranscriptionModelChanged(value: String) = updateDraft { it.copy(transcriptionModel = value) }
+
+    fun onProtocolModelChanged(value: String) = updateDraft { it.copy(protocolModel = value) }
+
+    fun onTranscriptionPromptChanged(value: String) = updateDraft { it.copy(transcriptionPrompt = value) }
+
+    fun onProtocolPromptChanged(value: String) = updateDraft { it.copy(protocolPrompt = value) }
+
+    fun resetTranscriptionPromptToDefault(defaultPrompt: String) =
+        updateDraft { it.copy(transcriptionPrompt = defaultPrompt) }
+
+    fun resetProtocolPromptToDefault(defaultPrompt: String) =
+        updateDraft { it.copy(protocolPrompt = defaultPrompt) }
+
+    fun requestDiscardDialog() {
+        _uiState.update { current ->
+            if (current.hasUnsavedChanges) current.copy(showDiscardDialog = true) else current
+        }
+    }
+
+    fun dismissDiscardDialog() {
+        _uiState.update { it.copy(showDiscardDialog = false) }
+    }
+
+    private fun updateDraft(transform: (SettingsDraft) -> SettingsDraft) {
+        _uiState.update { current ->
+            if (!current.isLoaded) return@update current
+            editVersion++
+            val nextDraft = transform(current.draft)
+            current.copy(
+                draft = nextDraft,
+                urlValidation = OpenAiApiClient.validateBaseUrl(nextDraft.baseUrl)
+            )
+        }
+    }
+
+    fun saveSettings() {
+        val currentState = _uiState.value
+        if (!currentState.isLoaded || currentState.isSaving) return
+        val draft = currentState.draft
+        val editVersionAtStart = editVersion
+        val validatedUrl = when (val result = OpenAiApiClient.validateBaseUrl(draft.baseUrl)) {
+            is BaseUrlValidationResult.Valid -> result.normalizedUrl
+            BaseUrlValidationResult.InvalidSchemeOrHost -> {
+                viewModelScope.launch { _messageFlow.emit(app.getString(R.string.error_invalid_base_url)) }
+                return
+            }
+            BaseUrlValidationResult.ContainsCredentialsOrQuery -> {
+                viewModelScope.launch {
+                    _messageFlow.emit(app.getString(R.string.error_base_url_credentials_or_query))
+                }
+                return
+            }
+        }
+
+        _uiState.update { it.copy(isSaving = true) }
+        viewModelScope.launch {
             try {
-                apiClient.testConnection(baseUrl = validatedUrl, apiKey = apiKey).fold(
+                repository.saveSettings(
+                    baseUrl = validatedUrl,
+                    apiKey = draft.apiKey,
+                    transcriptionMode = draft.transcriptionMode,
+                    transcriptionModel = draft.transcriptionModel,
+                    protocolModel = draft.protocolModel,
+                    transcriptionPrompt = draft.transcriptionPrompt,
+                    protocolPrompt = draft.protocolPrompt
+                )
+                val persisted = repository.settingsFlow.first()
+                _uiState.update { state ->
+                    if (editVersion == editVersionAtStart) {
+                        state.copy(
+                            baseline = persisted,
+                            draft = persisted.toDraft(),
+                            urlValidation = OpenAiApiClient.validateBaseUrl(persisted.baseUrl),
+                            isSaving = false
+                        )
+                    } else {
+                        state.copy(
+                            baseline = persisted,
+                            isSaving = false
+                        )
+                    }
+                }
+                _messageFlow.emit(app.getString(R.string.msg_settings_saved))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isSaving = false) }
+                throw e
+            }
+        }
+    }
+
+    fun testConnection() {
+        val currentState = _uiState.value
+        if (!currentState.isLoaded || currentState.isTestingConnection) return
+        val draft = currentState.draft
+        val validatedUrl = when (val result = OpenAiApiClient.validateBaseUrl(draft.baseUrl)) {
+            is BaseUrlValidationResult.Valid -> result.normalizedUrl
+            BaseUrlValidationResult.InvalidSchemeOrHost -> {
+                viewModelScope.launch { _messageFlow.emit(app.getString(R.string.error_invalid_base_url)) }
+                return
+            }
+            BaseUrlValidationResult.ContainsCredentialsOrQuery -> {
+                viewModelScope.launch {
+                    _messageFlow.emit(app.getString(R.string.error_base_url_credentials_or_query))
+                }
+                return
+            }
+        }
+        if (draft.apiKey.isBlank()) {
+            viewModelScope.launch { _messageFlow.emit(app.getString(R.string.msg_missing_api_key)) }
+            return
+        }
+
+        _uiState.update { it.copy(isTestingConnection = true) }
+        viewModelScope.launch {
+            try {
+                apiClient.testConnection(baseUrl = validatedUrl, apiKey = draft.apiKey).fold(
                     onSuccess = {
                         _messageFlow.emit(app.getString(R.string.msg_connection_test_success))
                     },
@@ -131,11 +236,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     }
                 )
             } finally {
-                _isTestingConnection.value = false
+                _uiState.update { it.copy(isTestingConnection = false) }
             }
         }
     }
 }
+
+private fun ApiSettings.toDraft(): SettingsDraft = SettingsDraft(
+    baseUrl = baseUrl,
+    apiKey = apiKey,
+    transcriptionMode = transcriptionMode,
+    transcriptionModel = transcriptionModel,
+    protocolModel = protocolModel,
+    transcriptionPrompt = transcriptionPrompt,
+    protocolPrompt = protocolPrompt
+)
 
 internal fun formatConnectionTestFailure(context: Context, error: Throwable): String = when (error) {
     is UnsupportedModelsEndpointException ->
