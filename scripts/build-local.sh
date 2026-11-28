@@ -12,7 +12,7 @@ if [[ -f "$config_file" ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-    set -- assembleDebug testDebugUnitTest lintDebug
+    set -- assembleDebug :app:compileDebugAndroidTestKotlin testDebugUnitTest lintDebug
 fi
 
 cd -- "$repo_dir"
