@@ -5,6 +5,7 @@ import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeExcepti
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
 import io.github.benjamin_aicheler.lastmeeting.data.api.EmptyAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
+import io.github.benjamin_aicheler.lastmeeting.data.api.InvalidApiKeyException
 import io.github.benjamin_aicheler.lastmeeting.data.api.MalformedAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.api.UnexpectedModelsResponseException
@@ -36,10 +37,13 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.io.RandomAccessFile
 import java.net.InetAddress
 import java.net.ServerSocket
@@ -1073,6 +1077,232 @@ class OpenAiApiClientTest {
             }
         } finally {
             tempFile.delete()
+        }
+    }
+
+    @Test
+    fun testConnectionReusesPoolAndDispatcherWithBoundedTimeouts() {
+        val apiClient = OpenAiApiClient()
+
+        assertSame(apiClient.mainHttpClient.connectionPool, apiClient.testConnectionClient.connectionPool)
+        assertSame(apiClient.mainHttpClient.dispatcher, apiClient.testConnectionClient.dispatcher)
+
+        assertEquals(60_000, apiClient.mainHttpClient.connectTimeoutMillis)
+        assertEquals(300_000, apiClient.mainHttpClient.readTimeoutMillis)
+        assertEquals(120_000, apiClient.mainHttpClient.writeTimeoutMillis)
+        assertEquals(0, apiClient.mainHttpClient.callTimeoutMillis)
+
+        assertEquals(15_000, apiClient.testConnectionClient.connectTimeoutMillis)
+        assertEquals(15_000, apiClient.testConnectionClient.readTimeoutMillis)
+        assertEquals(15_000, apiClient.testConnectionClient.writeTimeoutMillis)
+        assertEquals(15_000, apiClient.testConnectionClient.callTimeoutMillis)
+    }
+
+    @Test
+    fun slowModelsBodyTimesOutWithinCallBudgetWithoutChangingUploadTimeouts() = runBlocking {
+        val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
+        val serverThread = thread(isDaemon = true) {
+            runCatching {
+                server.accept().use { socket ->
+                    val input = socket.getInputStream().bufferedReader()
+                    while (true) {
+                        val line = input.readLine() ?: break
+                        if (line.isEmpty()) break
+                    }
+                    val out = socket.getOutputStream()
+                    val header = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
+                    out.write(header.toByteArray())
+                    out.flush()
+                    val chunks = listOf("{\"data\":[", "{\"id\":\"", "gpt-4o", "\"}]}")
+                    repeat(14) { idx ->
+                        val chunk = if (idx < chunks.size) chunks[idx] else " "
+                        val bytes = chunk.toByteArray()
+                        val frame = "${Integer.toHexString(bytes.size)}\r\n"
+                        out.write(frame.toByteArray())
+                        out.write(bytes)
+                        out.write("\r\n".toByteArray())
+                        out.flush()
+                        Thread.sleep(250)
+                    }
+                    out.write("0\r\n\r\n".toByteArray())
+                    out.flush()
+                }
+            }
+        }
+
+        try {
+            val apiClient = OpenAiApiClient(testConnectionTimeoutSeconds = 1L)
+            assertEquals(60_000, apiClient.mainHttpClient.connectTimeoutMillis)
+            assertEquals(300_000, apiClient.mainHttpClient.readTimeoutMillis)
+            assertEquals(120_000, apiClient.mainHttpClient.writeTimeoutMillis)
+            assertEquals(0, apiClient.mainHttpClient.callTimeoutMillis)
+            assertEquals(1_000, apiClient.testConnectionClient.callTimeoutMillis)
+
+            val startedNs = System.nanoTime()
+            val result = apiClient.testConnection(
+                baseUrl = "http://127.0.0.1:${server.localPort}/v1/",
+                apiKey = "sk-test"
+            )
+            val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNs)
+
+            assertTrue("Expected timeout failure, got $result", result.isFailure)
+            val error = result.exceptionOrNull()
+            assertTrue("Expected InterruptedIOException, got $error", error is InterruptedIOException)
+            assertTrue("Expected timeout under 2500ms, took ${elapsedMs}ms", elapsedMs < 2_500L)
+        } finally {
+            server.close()
+            serverThread.join(1_000)
+        }
+    }
+
+    @Test
+    fun trimsOuterWhitespaceConsistentlyAcrossAllFourRoutes() = runBlocking {
+        val capturedAuthHeaders = mutableListOf<Pair<String, String?>>()
+        val apiClient = OpenAiApiClient(
+            httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                val req = chain.request()
+                capturedAuthHeaders += req.url.encodedPath to req.header("Authorization")
+                val body = when {
+                    req.url.encodedPath.endsWith("/models") -> """{"data":[{"id":"gpt-4o"}]}"""
+                    req.url.encodedPath.endsWith("/audio/transcriptions") -> """{"text":"hello"}"""
+                    else -> """{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"""
+                }
+                Response.Builder()
+                    .request(req)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(body.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }).build()
+        )
+        val audioFile = File.createTempFile("trim-auth-", ".m4a").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+        val paddedKey = "  \tsk-test-key\n "
+
+        try {
+            assertTrue(
+                apiClient.transcribeAudio(
+                    baseUrl = "https://api.openai.com/v1/",
+                    apiKey = paddedKey,
+                    model = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+                    prompt = "",
+                    audioFile = audioFile,
+                    transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS
+                ).isSuccess
+            )
+            assertTrue(
+                apiClient.transcribeAudio(
+                    baseUrl = "https://openrouter.ai/api/v1/",
+                    apiKey = paddedKey,
+                    model = "google/gemini-2.5-flash",
+                    prompt = "Transcribe",
+                    audioFile = audioFile,
+                    transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS
+                ).isSuccess
+            )
+            assertTrue(
+                apiClient.generateFromText(
+                    baseUrl = "https://api.openai.com/v1/",
+                    apiKey = paddedKey,
+                    model = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+                    systemPrompt = "Summarize",
+                    userText = "Transcript"
+                ).isSuccess
+            )
+            assertTrue(
+                apiClient.testConnection(
+                    baseUrl = "https://api.openai.com/v1/",
+                    apiKey = paddedKey
+                ).isSuccess
+            )
+
+            assertEquals(4, capturedAuthHeaders.size)
+            capturedAuthHeaders.forEach { (path, auth) ->
+                assertEquals("Unexpected header for $path", "Bearer sk-test-key", auth)
+            }
+        } finally {
+            audioFile.delete()
+        }
+    }
+
+    @Test
+    fun invalidApiKeyCharactersFailWithoutNetworkCallsOrSecretLeakAcrossAllRoutes() = runBlocking {
+        val calls = AtomicInteger()
+        val apiClient = OpenAiApiClient(
+            httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                calls.incrementAndGet()
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body("{}".toResponseBody("application/json".toMediaType()))
+                    .build()
+            }).build()
+        )
+        val audioFile = File.createTempFile("invalid-key-", ".m4a").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+        val invalidKeys = listOf(
+            "sk-secret\u200Bkey",
+            "\u200Bsk-secret",
+            "sk-secret\u00A0key",
+            "sk-secret\nnext",
+            "sk-secret withspace"
+        )
+
+        fun assertInvalidKeyError(result: Result<*>, rawKey: String) {
+            val error = result.exceptionOrNull()
+            assertTrue("Expected InvalidApiKeyException, got $error", error is InvalidApiKeyException)
+            val message = error?.message ?: ""
+            assertFalse("Error leaked key marker", message.contains("sk-secret"))
+            assertFalse("Error leaked raw key", message.contains(rawKey))
+            assertNull("Unexpected cause could leak raw OkHttp header error", error?.cause)
+        }
+
+        try {
+            for (badKey in invalidKeys) {
+                assertInvalidKeyError(
+                    apiClient.transcribeAudio(
+                        baseUrl = "https://api.openai.com/v1/",
+                        apiKey = badKey,
+                        model = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+                        prompt = "",
+                        audioFile = audioFile,
+                        transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS
+                    ),
+                    badKey
+                )
+                assertInvalidKeyError(
+                    apiClient.transcribeAudio(
+                        baseUrl = "https://openrouter.ai/api/v1/",
+                        apiKey = badKey,
+                        model = "google/gemini-2.5-flash",
+                        prompt = "Transcribe",
+                        audioFile = audioFile,
+                        transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS
+                    ),
+                    badKey
+                )
+                assertInvalidKeyError(
+                    apiClient.generateFromText(
+                        baseUrl = "https://api.openai.com/v1/",
+                        apiKey = badKey,
+                        model = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+                        systemPrompt = "Summarize",
+                        userText = "Transcript"
+                    ),
+                    badKey
+                )
+                assertInvalidKeyError(
+                    apiClient.testConnection(
+                        baseUrl = "https://api.openai.com/v1/",
+                        apiKey = badKey
+                    ),
+                    badKey
+                )
+            }
+            assertEquals(0, calls.get())
+        } finally {
+            audioFile.delete()
         }
     }
 }

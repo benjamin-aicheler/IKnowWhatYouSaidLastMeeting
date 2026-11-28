@@ -8,6 +8,7 @@ import io.github.benjamin_aicheler.lastmeeting.LastMeetingApp
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
+import io.github.benjamin_aicheler.lastmeeting.data.api.InvalidApiKeyException
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.api.UnexpectedModelsResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.UnsupportedModelsEndpointException
@@ -73,7 +74,7 @@ class SettingsViewModel internal constructor(
     constructor(application: Application) : this(
         app = application,
         repository = (application as LastMeetingApp).settingsRepository,
-        apiClient = OpenAiApiClient()
+        apiClient = application.apiClient
     )
 
     private var editVersion = 0L
@@ -253,6 +254,8 @@ private fun ApiSettings.toDraft(): SettingsDraft = SettingsDraft(
 )
 
 internal fun formatConnectionTestFailure(context: Context, error: Throwable): String = when (error) {
+    is InvalidApiKeyException ->
+        context.getString(R.string.msg_connection_test_invalid_api_key)
     is UnsupportedModelsEndpointException ->
         context.getString(R.string.msg_connection_test_models_unsupported, error.code)
     is UnexpectedModelsResponseException ->

@@ -706,6 +706,86 @@ class AiProcessingWorkerTest {
         }
     }
 
+    @Test
+    @Config(application = LastMeetingApp::class)
+    fun invalidApiKeyFailsPermanentlyWithoutSegmentingOrCallingNetwork() = runBlocking {
+        val app = RuntimeEnvironment.getApplication() as LastMeetingApp
+        val dao = app.database.meetingDao()
+        val previousRepository = app.meetingRepository
+        app.settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "sk-invalid\u200Bkey",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val configRevision = app.settingsRepository.settingsFlow.first().providerConfigRevision
+        val audioFile = File.createTempFile("worker-invalid-key-", ".m4a", app.filesDir).apply { writeText("audio") }
+        val calls = AtomicInteger()
+        var segmented = false
+        try {
+            app.meetingRepository = MeetingRepository(
+                context = app,
+                meetingDao = dao,
+                settingsRepository = app.settingsRepository,
+                apiClient = OpenAiApiClient(
+                    httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                        calls.incrementAndGet()
+                        Response.Builder()
+                            .request(chain.request())
+                            .protocol(Protocol.HTTP_1_1)
+                            .code(200)
+                            .message("OK")
+                            .body("""{"text":"ok"}""".toResponseBody("application/json".toMediaType()))
+                            .build()
+                    }).build()
+                ),
+                audioSegmenter = AudioSegmenter { _, _ ->
+                    segmented = true
+                    error("Segmentation should not run for an invalid API key")
+                }
+            )
+            val id = dao.insertMeeting(
+                MeetingEntity(
+                    title = "Invalid API key meeting",
+                    startTime = 1L,
+                    endTime = 2L,
+                    audioFilePath = audioFile.absolutePath,
+                    transcript = "Existing transcript"
+                )
+            )
+            val worker = TestListenableWorkerBuilder<AiProcessingWorker>(app)
+                .setInputData(
+                    workDataOf(
+                        AiProcessingWorker.KEY_MEETING_ID to id,
+                        AiProcessingWorker.KEY_TASK_TYPE to AiProcessingWorker.TASK_TRANSCRIBE,
+                        AiProcessingWorker.KEY_GENERATION to 0L,
+                        AiProcessingWorker.KEY_CONFIG_REVISION to configRevision
+                    )
+                )
+                .setRunAttemptCount(0)
+                .build()
+
+            val result = worker.doWork()
+            assertEquals(
+                ListenableWorker.Result.failure(
+                    workDataOf(AiProcessingWorker.KEY_ERROR_CODE to AiTaskErrorCode.INVALID_API_KEY.code)
+                ),
+                result
+            )
+            assertEquals(0, calls.get())
+            assertFalse(segmented)
+            val saved = dao.getMeetingByIdDirect(id)!!
+            assertEquals("Existing transcript", saved.transcript)
+            assertEquals(app.getString(R.string.msg_ai_error_invalid_api_key), saved.transcriptError)
+        } finally {
+            app.meetingRepository = previousRepository
+            audioFile.delete()
+        }
+    }
+
     private fun discarded() = ListenableWorker.Result.success(workDataOf(AiProcessingWorker.KEY_DISCARDED to true))
 
     private class FakeSettingsProvider(initial: ApiSettings) : SettingsProvider {

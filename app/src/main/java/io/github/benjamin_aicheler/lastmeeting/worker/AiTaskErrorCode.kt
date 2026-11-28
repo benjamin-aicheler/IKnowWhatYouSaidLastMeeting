@@ -6,6 +6,7 @@ import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
 import io.github.benjamin_aicheler.lastmeeting.data.api.EmptyAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
+import io.github.benjamin_aicheler.lastmeeting.data.api.InvalidApiKeyException
 import io.github.benjamin_aicheler.lastmeeting.data.api.MalformedAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.repository.MeetingRepository
 import io.github.benjamin_aicheler.lastmeeting.repository.ProviderConfigurationChangedException
@@ -20,6 +21,7 @@ internal class AiTaskException(
 
 enum class AiTaskErrorCode(val code: String) {
     MISSING_API_KEY("missing_api_key"),
+    INVALID_API_KEY("invalid_api_key"),
     AUDIO_NOT_FOUND("audio_not_found"),
     AUDIO_TOO_LARGE("audio_too_large"),
     AUDIO_SPLIT_FAILED("audio_split_failed"),
@@ -40,6 +42,7 @@ enum class AiTaskErrorCode(val code: String) {
     fun localizedMessage(context: Context): String = context.getString(
         when (this) {
             MISSING_API_KEY -> R.string.msg_missing_api_key
+            INVALID_API_KEY -> R.string.msg_ai_error_invalid_api_key
             AUDIO_NOT_FOUND -> R.string.msg_audio_not_found
             AUDIO_TOO_LARGE -> R.string.msg_audio_too_large
             AUDIO_SPLIT_FAILED -> R.string.msg_audio_too_large_split_failed
@@ -64,6 +67,7 @@ enum class AiTaskErrorCode(val code: String) {
 
         fun fromThrowable(error: Throwable): AiTaskErrorCode = when (error) {
             is AiTaskException -> error.errorCode
+            is InvalidApiKeyException -> INVALID_API_KEY
             is ProviderConfigurationChangedException -> PROVIDER_CONFIG_CHANGED
             is AudioFileTooLargeException -> AUDIO_TOO_LARGE
             is IncompleteCompletionException -> INCOMPLETE_RESPONSE

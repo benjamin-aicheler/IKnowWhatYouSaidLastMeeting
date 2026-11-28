@@ -4,6 +4,7 @@ import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
 import io.github.benjamin_aicheler.lastmeeting.data.api.EmptyAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
+import io.github.benjamin_aicheler.lastmeeting.data.api.InvalidApiKeyException
 import io.github.benjamin_aicheler.lastmeeting.data.api.MalformedAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.repository.ProviderConfigurationChangedException
 import org.junit.Assert.assertFalse
@@ -69,6 +70,7 @@ class AiRetryPolicyTest {
         )
         assertFalse(AiRetryPolicy.isRetryable(EmptyAiResponseException("empty"), 0))
         assertFalse(AiRetryPolicy.isRetryable(MalformedAiResponseException("malformed"), 0))
+        assertFalse(AiRetryPolicy.isRetryable(InvalidApiKeyException(), 0))
     }
 
     @Test

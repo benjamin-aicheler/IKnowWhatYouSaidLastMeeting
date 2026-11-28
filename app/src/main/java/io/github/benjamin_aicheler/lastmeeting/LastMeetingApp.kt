@@ -2,6 +2,7 @@ package io.github.benjamin_aicheler.lastmeeting
 
 import android.app.Application
 import android.util.Log
+import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.db.MeetingDatabase
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
 import io.github.benjamin_aicheler.lastmeeting.repository.MeetingRepository
@@ -23,6 +24,9 @@ class LastMeetingApp : Application() {
     lateinit var settingsRepository: SettingsRepository
         private set
 
+    lateinit var apiClient: OpenAiApiClient
+        internal set
+
     lateinit var meetingRepository: MeetingRepository
         internal set
 
@@ -30,10 +34,12 @@ class LastMeetingApp : Application() {
         super.onCreate()
         database = MeetingDatabase.getDatabase(this)
         settingsRepository = SettingsRepository(this)
+        apiClient = OpenAiApiClient()
         meetingRepository = MeetingRepository(
             context = this,
             meetingDao = database.meetingDao(),
-            settingsRepository = settingsRepository
+            settingsRepository = settingsRepository,
+            apiClient = apiClient
         )
 
         // A killed process can leave an unfinished row or a recording without one; repair that
