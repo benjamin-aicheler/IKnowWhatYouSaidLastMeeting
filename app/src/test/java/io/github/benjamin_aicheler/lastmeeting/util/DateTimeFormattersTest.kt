@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import java.time.DayOfWeek
+import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
@@ -69,5 +70,11 @@ class DateTimeFormattersTest {
         val deDate = DateTimeFormatters.formatLocalizedDate("2026-11-11", Locale.GERMANY)
         assertNotEquals(usDate, deDate)
         assertEquals("not-a-date", DateTimeFormatters.formatLocalizedDate("not-a-date", Locale.US))
+
+        val accessibleUs = DateTimeFormatters.formatAccessibleDate(LocalDate.of(2026, 11, 11), Locale.US)
+        val accessibleDe = DateTimeFormatters.formatAccessibleDate(LocalDate.of(2026, 11, 11), Locale.GERMANY)
+        assertNotEquals(accessibleUs, accessibleDe)
+        org.junit.Assert.assertTrue(accessibleUs.contains("2026") && accessibleUs.contains("11"))
+        org.junit.Assert.assertTrue(accessibleDe.contains("2026") && accessibleDe.contains("11"))
     }
 }

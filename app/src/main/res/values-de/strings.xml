@@ -154,6 +154,8 @@
     <string name="action_next_month">Nächster Monat</string>
     <string name="action_show_api_key">API-Schlüssel anzeigen</string>
     <string name="action_hide_api_key">API-Schlüssel verbergen</string>
+    <string name="calendar_day_with_meetings">%1$s, hat Sitzungen</string>
+    <string name="calendar_day_no_meetings">%1$s, keine Sitzungen</string>
 
     <!-- Base URL Validation & Connection Test -->
     <string name="error_invalid_base_url">Geben Sie eine gültige http://- oder https://-Basis-URL ein.</string>
