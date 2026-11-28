@@ -2,6 +2,9 @@ package io.github.benjamin_aicheler.lastmeeting.ui.settings
 
 import android.app.Application
 import android.content.Context
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.benjamin_aicheler.lastmeeting.LastMeetingApp
@@ -79,6 +82,11 @@ class SettingsViewModel internal constructor(
 
     private var editVersion = 0L
 
+    // Keep plaintext API key edits only in ViewModel memory (never SavedStateHandle/rememberSaveable)
+    // so configuration changes preserve drafts without leaking secrets into saved instance state.
+    val apiKeyState: TextFieldState = TextFieldState()
+    private var isApplyingApiKeyProgrammatically = false
+
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
@@ -88,8 +96,11 @@ class SettingsViewModel internal constructor(
     init {
         viewModelScope.launch {
             repository.settingsFlow.collect { persisted ->
+                var shouldSyncApiKeyState = false
                 _uiState.update { current ->
-                    if (!current.isLoaded || (!current.hasUnsavedChanges && !current.isSaving)) {
+                    val shouldResetDraft = !current.isLoaded || (!current.hasUnsavedChanges && !current.isSaving)
+                    shouldSyncApiKeyState = shouldResetDraft
+                    if (shouldResetDraft) {
                         current.copy(
                             isLoaded = true,
                             baseline = persisted,
@@ -100,13 +111,41 @@ class SettingsViewModel internal constructor(
                         current.copy(isLoaded = true, baseline = persisted)
                     }
                 }
+                if (shouldSyncApiKeyState) {
+                    applyApiKeyToState(persisted.apiKey)
+                }
+            }
+        }
+        viewModelScope.launch {
+            snapshotFlow { apiKeyState.text.toString() }.collect { currentKey ->
+                if (!isApplyingApiKeyProgrammatically &&
+                    _uiState.value.isLoaded &&
+                    currentKey != _uiState.value.draft.apiKey
+                ) {
+                    updateDraft { it.copy(apiKey = currentKey) }
+                }
+            }
+        }
+    }
+
+    private fun applyApiKeyToState(value: String) {
+        if (apiKeyState.text.toString() != value) {
+            isApplyingApiKeyProgrammatically = true
+            try {
+                apiKeyState.setTextAndPlaceCursorAtEnd(value)
+            } finally {
+                isApplyingApiKeyProgrammatically = false
             }
         }
     }
 
     fun onBaseUrlChanged(value: String) = updateDraft { it.copy(baseUrl = value) }
 
-    fun onApiKeyChanged(value: String) = updateDraft { it.copy(apiKey = value) }
+    fun onApiKeyChanged(value: String) {
+        if (!_uiState.value.isLoaded) return
+        applyApiKeyToState(value)
+        updateDraft { it.copy(apiKey = value) }
+    }
 
     fun onTranscriptionModeChanged(mode: TranscriptionMode) = updateDraft { it.copy(transcriptionMode = mode) }
 
@@ -150,6 +189,7 @@ class SettingsViewModel internal constructor(
         val currentState = _uiState.value
         if (!currentState.isLoaded || currentState.isSaving) return
         val draft = currentState.draft
+        val currentApiKey = apiKeyState.text.toString()
         val editVersionAtStart = editVersion
         val validatedUrl = when (val result = OpenAiApiClient.validateBaseUrl(draft.baseUrl)) {
             is BaseUrlValidationResult.Valid -> result.normalizedUrl
@@ -170,7 +210,7 @@ class SettingsViewModel internal constructor(
             try {
                 repository.saveSettings(
                     baseUrl = validatedUrl,
-                    apiKey = draft.apiKey,
+                    apiKey = currentApiKey,
                     transcriptionMode = draft.transcriptionMode,
                     transcriptionModel = draft.transcriptionModel,
                     protocolModel = draft.protocolModel,
@@ -178,8 +218,12 @@ class SettingsViewModel internal constructor(
                     protocolPrompt = draft.protocolPrompt
                 )
                 val persisted = repository.settingsFlow.first()
+                var shouldSyncApiKeyState = false
                 _uiState.update { state ->
-                    if (editVersion == editVersionAtStart) {
+                    val noConcurrentEdits =
+                        editVersion == editVersionAtStart && apiKeyState.text.toString() == currentApiKey
+                    shouldSyncApiKeyState = noConcurrentEdits
+                    if (noConcurrentEdits) {
                         state.copy(
                             baseline = persisted,
                             draft = persisted.toDraft(),
@@ -192,6 +236,9 @@ class SettingsViewModel internal constructor(
                             isSaving = false
                         )
                     }
+                }
+                if (shouldSyncApiKeyState) {
+                    applyApiKeyToState(persisted.apiKey)
                 }
                 _messageFlow.emit(app.getString(R.string.msg_settings_saved))
             } catch (e: CancellationException) {
@@ -207,6 +254,7 @@ class SettingsViewModel internal constructor(
         val currentState = _uiState.value
         if (!currentState.isLoaded || currentState.isTestingConnection) return
         val draft = currentState.draft
+        val currentApiKey = apiKeyState.text.toString()
         val validatedUrl = when (val result = OpenAiApiClient.validateBaseUrl(draft.baseUrl)) {
             is BaseUrlValidationResult.Valid -> result.normalizedUrl
             BaseUrlValidationResult.InvalidSchemeOrHost -> {
@@ -220,7 +268,7 @@ class SettingsViewModel internal constructor(
                 return
             }
         }
-        if (draft.apiKey.isBlank()) {
+        if (currentApiKey.isBlank()) {
             viewModelScope.launch { _messageFlow.emit(app.getString(R.string.msg_missing_api_key)) }
             return
         }
@@ -228,7 +276,7 @@ class SettingsViewModel internal constructor(
         _uiState.update { it.copy(isTestingConnection = true) }
         viewModelScope.launch {
             try {
-                apiClient.testConnection(baseUrl = validatedUrl, apiKey = draft.apiKey).fold(
+                apiClient.testConnection(baseUrl = validatedUrl, apiKey = currentApiKey).fold(
                     onSuccess = {
                         _messageFlow.emit(app.getString(R.string.msg_connection_test_success))
                     },

@@ -38,11 +38,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +65,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.ui.components.DeleteConfirmationDialog
 import io.github.benjamin_aicheler.lastmeeting.ui.theme.AppIcons
+import kotlin.math.roundToInt
 import io.github.benjamin_aicheler.lastmeeting.util.DateTimeFormatters
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -320,41 +323,13 @@ fun MeetingDetailsScreen(
                             }
                         }
                         if (audioDurationMs > 0) {
-                            var isDraggingSlider by remember(currentMeeting.id) { mutableStateOf(false) }
-                            var dragPositionMs by remember(currentMeeting.id) { mutableStateOf(0f) }
-                            val displayedPositionMs = if (isDraggingSlider) {
-                                dragPositionMs.toInt()
-                            } else {
-                                audioPositionMs.coerceIn(0, audioDurationMs)
-                            }
                             Spacer(modifier = Modifier.height(8.dp))
-                            Slider(
-                                value = displayedPositionMs.toFloat(),
-                                onValueChange = { newValue ->
-                                    isDraggingSlider = true
-                                    dragPositionMs = newValue
-                                },
-                                onValueChangeFinished = {
-                                    val target = dragPositionMs.toInt()
-                                    isDraggingSlider = false
-                                    viewModel.seekAudioTo(target)
-                                },
-                                valueRange = 0f..audioDurationMs.toFloat(),
-                                modifier = Modifier.fillMaxWidth()
+                            AudioSeekBar(
+                                meetingId = currentMeeting.id,
+                                audioPositionMs = audioPositionMs,
+                                audioDurationMs = audioDurationMs,
+                                onSeekCommitted = viewModel::seekAudioTo
                             )
-                            val locale = LocalLocale.current.platformLocale
-                            val elapsedFormatted = formatMillis(displayedPositionMs, locale)
-                            val totalFormatted = formatMillis(audioDurationMs, locale)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                Text(
-                                    text = "$elapsedFormatted / $totalFormatted",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
                         }
                         if (currentMeeting.isDamaged) {
                             Spacer(modifier = Modifier.height(8.dp))
@@ -608,6 +583,70 @@ private fun ResultCard(
                     color = MaterialTheme.colorScheme.error
                 )
             }
+        }
+    }
+}
+
+@Composable
+internal fun AudioSeekBar(
+    meetingId: Long,
+    audioPositionMs: Int,
+    audioDurationMs: Int,
+    onSeekCommitted: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (audioDurationMs <= 0) return
+
+    val clampedPositionMs = audioPositionMs.coerceIn(0, audioDurationMs)
+    val sliderState = remember(meetingId, audioDurationMs) {
+        SliderState(
+            value = clampedPositionMs.toFloat(),
+            trackRange = 0f..audioDurationMs.toFloat()
+        )
+    }
+    var pendingSeekTargetMs by remember(meetingId, audioDurationMs) {
+        mutableStateOf<Int?>(null)
+    }
+
+    SideEffect {
+        if (pendingSeekTargetMs == null) {
+            val nextValue = clampedPositionMs.toFloat()
+            if (sliderState.value != nextValue) {
+                sliderState.value = nextValue
+            }
+        }
+    }
+
+    val displayedPositionMs = (pendingSeekTargetMs ?: clampedPositionMs).coerceIn(0, audioDurationMs)
+    Column(modifier = modifier.fillMaxWidth()) {
+        Slider(
+            state = sliderState,
+            onValueChange = { newValue ->
+                val clampedTarget = newValue.roundToInt().coerceIn(0, audioDurationMs)
+                sliderState.value = clampedTarget.toFloat()
+                pendingSeekTargetMs = clampedTarget
+            },
+            onValueChangeFinished = {
+                val target = pendingSeekTargetMs
+                pendingSeekTargetMs = null
+                if (target != null) {
+                    onSeekCommitted(target)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        val locale = LocalLocale.current.platformLocale
+        val elapsedFormatted = formatMillis(displayedPositionMs, locale)
+        val totalFormatted = formatMillis(audioDurationMs, locale)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Text(
+                text = "$elapsedFormatted / $totalFormatted",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
