@@ -154,6 +154,8 @@
     <string name="action_next_month">Next month</string>
     <string name="action_show_api_key">Show API key</string>
     <string name="action_hide_api_key">Hide API key</string>
+    <string name="calendar_day_with_meetings">%1$s, has meetings</string>
+    <string name="calendar_day_no_meetings">%1$s, no meetings</string>
 
     <!-- Base URL Validation & Connection Test -->
     <string name="error_invalid_base_url">Enter a valid http:// or https:// base URL.</string>

@@ -8,12 +8,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +25,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -54,6 +59,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -68,6 +77,10 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
+
+// Clear the default 56.dp FloatingActionButton height plus Scaffold margin without duplicating nav insets.
+internal val FabListBottomPadding = 88.dp
+private val CalendarDayMinTouchTarget = 48.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -183,38 +196,10 @@ fun MainScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp)
         ) {
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp)
-            ) {
-                SegmentedButton(
-                    selected = viewMode == MainViewMode.LIST,
-                    onClick = { viewModel.setViewMode(MainViewMode.LIST) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    icon = {
-                        Icon(
-                            imageVector = AppIcons.List,
-                            contentDescription = stringResource(R.string.view_list)
-                        )
-                    }
-                ) {
-                    Text(text = stringResource(R.string.view_list))
-                }
-                SegmentedButton(
-                    selected = viewMode == MainViewMode.CALENDAR,
-                    onClick = { viewModel.setViewMode(MainViewMode.CALENDAR) },
-                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    icon = {
-                        Icon(
-                            imageVector = AppIcons.CalendarMonth,
-                            contentDescription = stringResource(R.string.view_calendar)
-                        )
-                    }
-                ) {
-                    Text(text = stringResource(R.string.view_calendar))
-                }
-            }
+            ViewModeSegmentedBar(
+                viewMode = viewMode,
+                onViewModeSelected = viewModel::setViewMode
+            )
 
             if (viewMode == MainViewMode.LIST) {
                 MeetingListView(
@@ -247,6 +232,46 @@ fun MainScreen(
 }
 
 @Composable
+internal fun ViewModeSegmentedBar(
+    viewMode: MainViewMode,
+    onViewModeSelected: (MainViewMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    SingleChoiceSegmentedButtonRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+    ) {
+        SegmentedButton(
+            selected = viewMode == MainViewMode.LIST,
+            onClick = { onViewModeSelected(MainViewMode.LIST) },
+            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+            icon = {
+                Icon(
+                    imageVector = AppIcons.List,
+                    contentDescription = null
+                )
+            }
+        ) {
+            Text(text = stringResource(R.string.view_list))
+        }
+        SegmentedButton(
+            selected = viewMode == MainViewMode.CALENDAR,
+            onClick = { onViewModeSelected(MainViewMode.CALENDAR) },
+            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+            icon = {
+                Icon(
+                    imageVector = AppIcons.CalendarMonth,
+                    contentDescription = null
+                )
+            }
+        ) {
+            Text(text = stringResource(R.string.view_calendar))
+        }
+    }
+}
+
+@Composable
 fun MeetingListView(
     meetings: List<MeetingEntity>,
     onMeetingClick: (Long) -> Unit
@@ -265,6 +290,7 @@ fun MeetingListView(
     } else {
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = FabListBottomPadding),
             modifier = Modifier.fillMaxSize()
         ) {
             items(meetings, key = { it.id }) { meeting ->
@@ -367,82 +393,81 @@ fun CalendarViewComponent(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        MonthCalendarCard(
-            currentMonth = currentMonth,
-            onPreviousMonth = { currentMonthIso = currentMonth.minusMonths(1).toString() },
-            onNextMonth = { currentMonthIso = currentMonth.plusMonths(1).toString() },
-            datesWithMeetings = groupedMeetings.keys,
-            selectedDate = selectedDate,
-            onDateClick = { clickedDate ->
-                onDateSelected(if (selectedDate == clickedDate) null else clickedDate)
-            }
-        )
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(bottom = FabListBottomPadding)
+    ) {
+        item(key = "month_calendar_card") {
+            MonthCalendarCard(
+                currentMonth = currentMonth,
+                onPreviousMonth = { currentMonthIso = currentMonth.minusMonths(1).toString() },
+                onNextMonth = { currentMonthIso = currentMonth.plusMonths(1).toString() },
+                datesWithMeetings = groupedMeetings.keys,
+                selectedDate = selectedDate,
+                onDateClick = { clickedDate ->
+                    onDateSelected(if (selectedDate == clickedDate) null else clickedDate)
+                }
+            )
+        }
 
         if (selectedDate != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                FilterChip(
-                    selected = true,
-                    onClick = { onDateSelected(null) },
-                    label = { Text("${DateTimeFormatters.formatLocalizedDate(selectedDate, locale)} ✕") }
-                )
-                FilterChip(
-                    selected = false,
-                    onClick = { onDateSelected(null) },
-                    label = { Text(stringResource(R.string.filter_all_dates)) }
-                )
+            item(key = "selected_date_filter_row") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilterChip(
+                        selected = true,
+                        onClick = { onDateSelected(null) },
+                        label = { Text("${DateTimeFormatters.formatLocalizedDate(selectedDate, locale)} ✕") }
+                    )
+                    FilterChip(
+                        selected = false,
+                        onClick = { onDateSelected(null) },
+                        label = { Text(stringResource(R.string.filter_all_dates)) }
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
         if (meetings.isEmpty() || (selectedDate != null && groupedMeetings[selectedDate].isNullOrEmpty())) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = stringResource(R.string.no_meetings),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            item(key = "calendar_empty_state") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.no_meetings),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            ) {
-                items(displayedDates, key = { it }) { dateStr ->
-                    val meetingsForDate = groupedMeetings[dateStr] ?: emptyList()
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = DateTimeFormatters.formatLocalizedDate(dateStr, locale),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 4.dp)
+            items(displayedDates, key = { it }) { dateStr ->
+                val meetingsForDate = groupedMeetings[dateStr] ?: emptyList()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Text(
+                        text = DateTimeFormatters.formatLocalizedDate(dateStr, locale),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    meetingsForDate.forEach { meeting ->
+                        MeetingItemCard(
+                            meeting = meeting,
+                            onClick = { onMeetingClick(meeting.id) }
                         )
-                        meetingsForDate.forEach { meeting ->
-                            MeetingItemCard(
-                                meeting = meeting,
-                                onClick = { onMeetingClick(meeting.id) }
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
+                        Spacer(modifier = Modifier.height(6.dp))
                     }
                 }
             }
@@ -451,13 +476,14 @@ fun CalendarViewComponent(
 }
 
 @Composable
-private fun MonthCalendarCard(
+internal fun MonthCalendarCard(
     currentMonth: YearMonth,
     onPreviousMonth: () -> Unit,
     onNextMonth: () -> Unit,
     datesWithMeetings: Set<String>,
     selectedDate: String?,
-    onDateClick: (String) -> Unit
+    onDateClick: (String) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val locale = LocalLocale.current.platformLocale
     val monthFormatter = remember(locale) { DateTimeFormatter.ofPattern("MMMM yyyy", locale) }
@@ -465,10 +491,10 @@ private fun MonthCalendarCard(
     val daysOfWeek = remember(locale) { DateTimeFormatters.orderedWeekDays(locale) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -493,81 +519,132 @@ private fun MonthCalendarCard(
                 }
             }
 
-            Row(modifier = Modifier.fillMaxWidth()) {
-                for (dow in daysOfWeek) {
-                    Text(
-                        text = dow.getDisplayName(TextStyle.SHORT, locale),
-                        modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
             val leadingEmptyCells = DateTimeFormatters.leadingEmptyCells(currentMonth, locale)
             val daysInMonth = currentMonth.lengthOfMonth()
             val totalCells = ((leadingEmptyCells + daysInMonth + 6) / 7) * 7
 
-            for (week in 0 until (totalCells / 7)) {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    for (dayIndex in 0 until 7) {
-                        val cellIndex = week * 7 + dayIndex
-                        val dayNumber = cellIndex - leadingEmptyCells + 1
-                        if (dayNumber in 1..daysInMonth) {
-                            val date: LocalDate = currentMonth.atDay(dayNumber)
-                            val dateStr = date.format(isoFormatter)
-                            val hasMeetings = datesWithMeetings.contains(dateStr)
-                            val isSelected = selectedDate == dateStr
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val minGridWidth = CalendarDayMinTouchTarget * 7
+                val gridWidth = maxOf(maxWidth, minGridWidth)
+                val scrollModifier = if (maxWidth < minGridWidth) {
+                    Modifier.horizontalScroll(rememberScrollState())
+                } else {
+                    Modifier
+                }
 
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .aspectRatio(1.2f)
-                                    .padding(2.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        when {
-                                            isSelected -> MaterialTheme.colorScheme.primary
-                                            hasMeetings -> MaterialTheme.colorScheme.primaryContainer
-                                            else -> MaterialTheme.colorScheme.surfaceVariant
+                Box(modifier = Modifier.fillMaxWidth().then(scrollModifier)) {
+                    Column(modifier = Modifier.width(gridWidth)) {
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            for (dow in daysOfWeek) {
+                                Text(
+                                    text = dow.getDisplayName(TextStyle.SHORT, locale),
+                                    modifier = Modifier.weight(1f),
+                                    textAlign = TextAlign.Center,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        for (week in 0 until (totalCells / 7)) {
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                for (dayIndex in 0 until 7) {
+                                    val cellIndex = week * 7 + dayIndex
+                                    val dayNumber = cellIndex - leadingEmptyCells + 1
+                                    if (dayNumber in 1..daysInMonth) {
+                                        val date: LocalDate = currentMonth.atDay(dayNumber)
+                                        val dateStr = date.format(isoFormatter)
+                                        val hasMeetings = datesWithMeetings.contains(dateStr)
+                                        val isSelected = selectedDate == dateStr
+                                        val accessibleDate = remember(date, locale) {
+                                            DateTimeFormatters.formatAccessibleDate(date, locale)
                                         }
-                                    )
-                                    .clickable { onDateClick(dateStr) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        text = dayNumber.toString(),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = if (hasMeetings || isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = when {
-                                            isSelected -> MaterialTheme.colorScheme.onPrimary
-                                            hasMeetings -> MaterialTheme.colorScheme.onPrimaryContainer
-                                            else -> MaterialTheme.colorScheme.onSurface
-                                        }
-                                    )
-                                    if (hasMeetings) {
+                                        val dayContentDescription = stringResource(
+                                            if (hasMeetings) {
+                                                R.string.calendar_day_with_meetings
+                                            } else {
+                                                R.string.calendar_day_no_meetings
+                                            },
+                                            accessibleDate
+                                        )
+
                                         Box(
                                             modifier = Modifier
-                                                .size(4.dp)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    if (isSelected) MaterialTheme.colorScheme.onPrimary
-                                                    else MaterialTheme.colorScheme.primary
+                                                .weight(1f)
+                                                .defaultMinSize(
+                                                    minWidth = CalendarDayMinTouchTarget,
+                                                    minHeight = CalendarDayMinTouchTarget
+                                                )
+                                                .selectable(
+                                                    selected = isSelected,
+                                                    role = Role.Button,
+                                                    onClick = { onDateClick(dateStr) }
+                                                )
+                                                .semantics {
+                                                    contentDescription = dayContentDescription
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .padding(2.dp)
+                                                    .defaultMinSize(minWidth = 40.dp, minHeight = 40.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        when {
+                                                            isSelected -> MaterialTheme.colorScheme.primary
+                                                            hasMeetings -> MaterialTheme.colorScheme.primaryContainer
+                                                            else -> MaterialTheme.colorScheme.surfaceVariant
+                                                        }
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier.clearAndSetSemantics {},
+                                                    horizontalAlignment = Alignment.CenterHorizontally
+                                                ) {
+                                                    Text(
+                                                        text = dayNumber.toString(),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontWeight = if (hasMeetings || isSelected) {
+                                                            FontWeight.Bold
+                                                        } else {
+                                                            FontWeight.Normal
+                                                        },
+                                                        color = when {
+                                                            isSelected -> MaterialTheme.colorScheme.onPrimary
+                                                            hasMeetings -> MaterialTheme.colorScheme.onPrimaryContainer
+                                                            else -> MaterialTheme.colorScheme.onSurface
+                                                        }
+                                                    )
+                                                    if (hasMeetings) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(4.dp)
+                                                                .clip(CircleShape)
+                                                                .background(
+                                                                    if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                                                    else MaterialTheme.colorScheme.primary
+                                                                )
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Spacer(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .defaultMinSize(
+                                                    minWidth = CalendarDayMinTouchTarget,
+                                                    minHeight = CalendarDayMinTouchTarget
                                                 )
                                         )
                                     }
                                 }
                             }
-                        } else {
-                            Spacer(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .aspectRatio(1.2f)
-                            )
                         }
                     }
                 }

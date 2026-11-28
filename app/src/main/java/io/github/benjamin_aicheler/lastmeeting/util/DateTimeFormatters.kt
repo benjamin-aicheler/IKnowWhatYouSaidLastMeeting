@@ -27,6 +27,9 @@ object DateTimeFormatters {
             DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale).format(date)
         }.getOrDefault(isoDate)
 
+    fun formatAccessibleDate(date: LocalDate, locale: Locale): String =
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(locale).format(date)
+
     fun toIsoDateKey(epochMillis: Long, zoneId: ZoneId = ZoneId.systemDefault()): String =
         Instant.ofEpochMilli(epochMillis).atZone(zoneId).toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
 
