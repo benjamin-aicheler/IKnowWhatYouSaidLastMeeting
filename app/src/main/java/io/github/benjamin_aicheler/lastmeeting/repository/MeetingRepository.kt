@@ -1,6 +1,7 @@
 package io.github.benjamin_aicheler.lastmeeting.repository
 
 import android.content.Context
+import androidx.work.WorkManager
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
 import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
@@ -13,6 +14,7 @@ import io.github.benjamin_aicheler.lastmeeting.util.AndroidAudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.DateTimeFormatters
 import io.github.benjamin_aicheler.lastmeeting.util.PdfExporter
+import io.github.benjamin_aicheler.lastmeeting.worker.AiProcessingWorker
 import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskErrorCode
 import io.github.benjamin_aicheler.lastmeeting.worker.AiTaskException
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +35,14 @@ class MeetingRepository(
     private val apiClient: OpenAiApiClient = OpenAiApiClient(),
     private val deleteAudioFile: (File) -> Boolean = File::delete,
     private val recordingsDir: File = File(context.filesDir, "recordings"),
-    private val audioSegmenter: AudioSegmenter = AndroidAudioSegmenter { File(context.cacheDir, "audio_segments") }
+    private val audioSegmenter: AudioSegmenter = AndroidAudioSegmenter {
+        File(context.cacheDir, AndroidAudioSegmenter.SEGMENT_CACHE_DIR_NAME)
+    },
+    private val onProtocolGenerationSuperseded: (meetingId: Long, supersededGeneration: Long) -> Unit = { meetingId, generation ->
+        if (WorkManager.isInitialized()) {
+            AiProcessingWorker.cancel(context, meetingId, AiProcessingWorker.TASK_PROTOCOLIZE, generation)
+        }
+    }
 ) {
 
     private val recordingRegistry = RecordingRegistry()
@@ -313,7 +322,11 @@ class MeetingRepository(
                 .filter { it.isNotEmpty() }
                 .joinToString("\n\n")
 
-            if (meetingDao.updateTranscript(id, mergedText, generation) > 0) {
+            val updateResult = meetingDao.updateTranscriptAndReportSupersededProtocol(id, mergedText, generation)
+            if (updateResult.updated) {
+                updateResult.supersededProtocolGeneration?.let { supersededGen ->
+                    onProtocolGenerationSuperseded(id, supersededGen)
+                }
                 Result.success(AiGenerationOutcome.Stored(mergedText))
             } else {
                 Result.success(AiGenerationOutcome.Discarded)

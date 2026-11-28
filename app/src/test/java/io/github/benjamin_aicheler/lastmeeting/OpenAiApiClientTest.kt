@@ -10,7 +10,12 @@ import io.github.benjamin_aicheler.lastmeeting.data.api.UnsupportedModelsEndpoin
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
 import io.github.benjamin_aicheler.lastmeeting.service.AndroidAudioRecorder
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -33,8 +38,13 @@ import org.junit.Test
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.util.Base64
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 
 class OpenAiApiClientTest {
 
@@ -773,5 +783,193 @@ class OpenAiApiClientTest {
         assertTrue(longStructuredFail!!.message!!.length <= OpenAiApiClient.MAX_API_ERROR_MESSAGE_CHARS)
         assertTrue(longStructuredFail.message!!.startsWith("Line 1 Line 2 "))
         assertTrue(longStructuredFail.message!!.endsWith("…"))
+    }
+
+    @Test
+    fun coroutineCancellationAbortsHttpCallBeforeHeadersDuringBodyAndDuringUpload() = runBlocking {
+        // 1. Cancel before response headers arrive (protocol generation)
+        run {
+            val requestReceived = CompletableDeferred<Unit>()
+            val releaseServer = CountDownLatch(1)
+            val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+            val serverThread = thread(isDaemon = true) {
+                runCatching {
+                    server.accept().use { socket ->
+                        val reader = socket.getInputStream().bufferedReader()
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            if (line.isEmpty()) break
+                        }
+                        requestReceived.complete(Unit)
+                        releaseServer.await(5, TimeUnit.SECONDS)
+                    }
+                }
+            }
+            val okHttp = OkHttpClient()
+            val client = OpenAiApiClient(httpClient = okHttp)
+            try {
+                val job = async(Dispatchers.Default) {
+                    client.generateFromText(
+                        baseUrl = "http://127.0.0.1:${server.localPort}/v1/",
+                        apiKey = "sk-test",
+                        model = "gpt-4o-mini",
+                        systemPrompt = "Prompt",
+                        userText = "Transcript"
+                    )
+                }
+                withTimeout(5_000) { requestReceived.await() }
+                job.cancel()
+                val thrown = runCatching { withTimeout(5_000) { job.await() } }.exceptionOrNull()
+                assertTrue("Expected CancellationException, got $thrown", thrown is CancellationException)
+                assertEquals(0, okHttp.dispatcher.runningCallsCount() + okHttp.dispatcher.queuedCallsCount())
+            } finally {
+                releaseServer.countDown()
+                server.close()
+                serverThread.join(2_000)
+                okHttp.dispatcher.executorService.shutdown()
+                okHttp.connectionPool.evictAll()
+            }
+        }
+
+        // 2. Cancel while reading a streaming response body (testConnection)
+        run {
+            val headersFlushed = CompletableDeferred<Unit>()
+            val releaseBody = CountDownLatch(1)
+            val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+            val serverThread = thread(isDaemon = true) {
+                runCatching {
+                    server.accept().use { socket ->
+                        val reader = socket.getInputStream().bufferedReader()
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            if (line.isEmpty()) break
+                        }
+                        val out = socket.getOutputStream()
+                        out.write(
+                            ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
+                                "Content-Length: 100\r\n\r\n{\"data\":[{\"id\":\"")
+                                .toByteArray(Charsets.US_ASCII)
+                        )
+                        out.flush()
+                        headersFlushed.complete(Unit)
+                        releaseBody.await(5, TimeUnit.SECONDS)
+                    }
+                }
+            }
+            val okHttp = OkHttpClient()
+            val client = OpenAiApiClient(httpClient = okHttp)
+            try {
+                val job = async(Dispatchers.Default) {
+                    client.testConnection(
+                        baseUrl = "http://127.0.0.1:${server.localPort}/v1/",
+                        apiKey = "sk-test"
+                    )
+                }
+                withTimeout(5_000) { headersFlushed.await() }
+                job.cancel()
+                val thrown = runCatching { withTimeout(5_000) { job.await() } }.exceptionOrNull()
+                assertTrue("Expected CancellationException, got $thrown", thrown is CancellationException)
+            } finally {
+                releaseBody.countDown()
+                server.close()
+                serverThread.join(2_000)
+                okHttp.dispatcher.executorService.shutdown()
+                okHttp.connectionPool.evictAll()
+            }
+        }
+
+        // 3. Cancel while uploading audio (transcribeAudio) + normal completion control
+        run {
+            val uploadStarted = CompletableDeferred<Unit>()
+            val releaseUpload = CountDownLatch(1)
+            val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+            val serverThread = thread(isDaemon = true) {
+                runCatching {
+                    server.accept().use { socket ->
+                        val input = socket.getInputStream()
+                        val buf = ByteArray(256)
+                        if (input.read(buf) > 0) {
+                            uploadStarted.complete(Unit)
+                        }
+                        // Stop draining so client stays stalled on upload / response
+                        releaseUpload.await(5, TimeUnit.SECONDS)
+                    }
+                }
+            }
+            val audioFile = File.createTempFile("cancel_upload_", ".m4a").apply {
+                writeBytes(ByteArray(256 * 1024) { 0x11 })
+            }
+            val okHttp = OkHttpClient()
+            val client = OpenAiApiClient(httpClient = okHttp)
+            try {
+                val job = async(Dispatchers.Default) {
+                    client.transcribeAudio(
+                        baseUrl = "http://127.0.0.1:${server.localPort}/v1/",
+                        apiKey = "sk-test",
+                        model = "gpt-4o-mini-transcribe",
+                        prompt = "Transcribe",
+                        audioFile = audioFile,
+                        transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS
+                    )
+                }
+                withTimeout(5_000) { uploadStarted.await() }
+                job.cancel()
+                val thrown = runCatching { withTimeout(5_000) { job.await() } }.exceptionOrNull()
+                assertTrue("Expected CancellationException, got $thrown", thrown is CancellationException)
+            } finally {
+                releaseUpload.countDown()
+                server.close()
+                serverThread.join(2_000)
+                audioFile.delete()
+                okHttp.dispatcher.executorService.shutdown()
+                okHttp.connectionPool.evictAll()
+            }
+        }
+
+        // 4. Normal loopback completion with suspendCancellableCoroutine transport
+        run {
+            val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+            val body = """{"choices":[{"message":{"content":"Loopback summary"}}]}"""
+            val serverThread = thread(isDaemon = true) {
+                runCatching {
+                    server.accept().use { socket ->
+                        val input = socket.getInputStream()
+                        val reader = input.bufferedReader()
+                        var contentLength = 0
+                        while (true) {
+                            val line = reader.readLine() ?: break
+                            if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                                contentLength = line.substringAfter(':').trim().toIntOrNull() ?: 0
+                            }
+                            if (line.isEmpty()) break
+                        }
+                        repeat(contentLength) { reader.read() }
+                        val response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" +
+                            "Content-Length: ${body.toByteArray().size}\r\nConnection: close\r\n\r\n$body"
+                        socket.getOutputStream().write(response.toByteArray(Charsets.UTF_8))
+                        socket.getOutputStream().flush()
+                    }
+                }
+            }
+            val okHttp = OkHttpClient()
+            val client = OpenAiApiClient(httpClient = okHttp)
+            try {
+                val result = withTimeout(5_000) {
+                    client.generateFromText(
+                        baseUrl = "http://127.0.0.1:${server.localPort}/v1/",
+                        apiKey = "sk-test",
+                        model = "gpt-4o-mini",
+                        systemPrompt = "Prompt",
+                        userText = "Transcript"
+                    )
+                }
+                assertEquals("Loopback summary", result.getOrNull())
+            } finally {
+                server.close()
+                serverThread.join(2_000)
+                okHttp.dispatcher.executorService.shutdown()
+                okHttp.connectionPool.evictAll()
+            }
+        }
     }
 }

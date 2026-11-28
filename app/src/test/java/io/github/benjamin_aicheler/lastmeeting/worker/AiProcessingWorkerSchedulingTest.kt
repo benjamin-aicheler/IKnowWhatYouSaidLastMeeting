@@ -99,4 +99,35 @@ class AiProcessingWorkerSchedulingTest {
         assertEquals(original.id,
             workManager.getWorkInfosForUniqueWork(AiProcessingWorker.uniqueWorkName(1L, task, 0L)).get().single().id)
     }
+
+    @Test
+    fun cancelAllForMeetingCancelsBothTasksWithoutAffectingOtherMeetings() {
+        AiProcessingWorker.enqueue(app, 1L, AiProcessingWorker.TASK_TRANSCRIBE, 0L, 0L).result.get()
+        AiProcessingWorker.enqueue(app, 1L, AiProcessingWorker.TASK_PROTOCOLIZE, 2L, 0L).result.get()
+        AiProcessingWorker.enqueue(app, 2L, AiProcessingWorker.TASK_TRANSCRIBE, 0L, 0L).result.get()
+        AiProcessingWorker.enqueue(app, 2L, AiProcessingWorker.TASK_PROTOCOLIZE, 0L, 0L).result.get()
+
+        AiProcessingWorker.cancelAllForMeeting(app, 1L)
+
+        assertEquals(
+            WorkInfo.State.CANCELLED,
+            workManager.getWorkInfosByTag(AiProcessingWorker.workTag(1L, AiProcessingWorker.TASK_TRANSCRIBE))
+                .get().single().state
+        )
+        assertEquals(
+            WorkInfo.State.CANCELLED,
+            workManager.getWorkInfosByTag(AiProcessingWorker.workTag(1L, AiProcessingWorker.TASK_PROTOCOLIZE))
+                .get().single().state
+        )
+        assertEquals(
+            WorkInfo.State.ENQUEUED,
+            workManager.getWorkInfosByTag(AiProcessingWorker.workTag(2L, AiProcessingWorker.TASK_TRANSCRIBE))
+                .get().single().state
+        )
+        assertEquals(
+            WorkInfo.State.ENQUEUED,
+            workManager.getWorkInfosByTag(AiProcessingWorker.workTag(2L, AiProcessingWorker.TASK_PROTOCOLIZE))
+                .get().single().state
+        )
+    }
 }

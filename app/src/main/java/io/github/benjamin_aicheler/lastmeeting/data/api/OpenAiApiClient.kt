@@ -2,7 +2,9 @@ package io.github.benjamin_aicheler.lastmeeting.data.api
 
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.SettingsRepository
 import io.github.benjamin_aicheler.lastmeeting.data.preferences.TranscriptionMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -10,6 +12,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
@@ -19,12 +23,15 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import okio.BufferedSink
 import java.io.File
 import java.io.IOException
 import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 @Serializable
 internal data class ChatCompletionResponse(
@@ -219,6 +226,8 @@ class OpenAiApiClient(
 
                 executeChatCompletionRequest(request)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -259,6 +268,8 @@ class OpenAiApiClient(
                 .build()
 
             executeChatCompletionRequest(request)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -289,23 +300,25 @@ class OpenAiApiClient(
                 .get()
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            executeCancellableCall(client, request) { response ->
                 val responseBody = response.body.string()
                 if (!response.isSuccessful) {
                     val httpError = parseErrorException(response.code, response.message, responseBody)
                     if (response.code == 404 || response.code == 405 || response.code == 501) {
-                        return@withContext Result.failure(
+                        return@executeCancellableCall Result.failure(
                             UnsupportedModelsEndpointException(
                                 response.code,
                                 httpError.message ?: "HTTP ${response.code}"
                             )
                         )
                     }
-                    return@withContext Result.failure(httpError)
+                    return@executeCancellableCall Result.failure(httpError)
                 }
                 validateModelsListResponse(response.body.contentType(), responseBody)
                 Result.success(Unit)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -341,38 +354,70 @@ class OpenAiApiClient(
         }
     }
 
-    private fun executeTranscriptionRequest(request: Request): Result<String> {
-        client.newCall(request).execute().use { response ->
+    private suspend fun <T> executeCancellableCall(
+        callClient: OkHttpClient,
+        request: Request,
+        handleResponse: (Response) -> T
+    ): T = suspendCancellableCoroutine { continuation ->
+        val call = callClient.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) {
+                    continuation.resumeWithException(e)
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val result = response.use { handleResponse(it) }
+                    if (continuation.isActive) {
+                        continuation.resume(result)
+                    }
+                } catch (e: Throwable) {
+                    if (continuation.isActive) {
+                        continuation.resumeWithException(e)
+                    }
+                }
+            }
+        })
+    }
+
+    private suspend fun executeTranscriptionRequest(request: Request): Result<String> =
+        executeCancellableCall(client, request) { response ->
             val responseBody = response.body.string()
 
             if (!response.isSuccessful) {
-                return Result.failure(parseErrorException(response.code, response.message, responseBody))
+                return@executeCancellableCall Result.failure(
+                    parseErrorException(response.code, response.message, responseBody)
+                )
             }
 
             val transcriptionResponse = json.decodeFromString<AudioTranscriptionResponse>(responseBody)
             val textResult = transcriptionResponse.text?.trim()
 
-            return if (!textResult.isNullOrEmpty()) {
+            if (!textResult.isNullOrEmpty()) {
                 Result.success(textResult)
             } else {
                 Result.failure(IOException("No response content generated from API."))
             }
         }
-    }
 
-    private fun executeChatCompletionRequest(request: Request): Result<String> {
-        client.newCall(request).execute().use { response ->
+    private suspend fun executeChatCompletionRequest(request: Request): Result<String> =
+        executeCancellableCall(client, request) { response ->
             val responseBody = response.body.string()
 
             if (!response.isSuccessful) {
-                return Result.failure(parseErrorException(response.code, response.message, responseBody))
+                return@executeCancellableCall Result.failure(
+                    parseErrorException(response.code, response.message, responseBody)
+                )
             }
 
             val completionResponse = json.decodeFromString<ChatCompletionResponse>(responseBody)
             val firstChoice = completionResponse.choices.firstOrNull()
             val finishReason = firstChoice?.finishReason?.trim()?.takeIf { it.isNotEmpty() }
             if (finishReason != null && !isCompleteFinishReason(finishReason)) {
-                return Result.failure(
+                return@executeCancellableCall Result.failure(
                     IncompleteCompletionException(
                         finishReason = finishReason,
                         message = "Incomplete response from API (finish_reason: $finishReason)."
@@ -381,13 +426,12 @@ class OpenAiApiClient(
             }
             val textResult = firstChoice?.message?.content?.trim()
 
-            return if (!textResult.isNullOrEmpty()) {
+            if (!textResult.isNullOrEmpty()) {
                 Result.success(textResult)
             } else {
                 Result.failure(IOException("No response content generated from API."))
             }
         }
-    }
 
     private fun isCompleteFinishReason(finishReason: String): Boolean =
         when (finishReason.trim().lowercase(Locale.ROOT)) {

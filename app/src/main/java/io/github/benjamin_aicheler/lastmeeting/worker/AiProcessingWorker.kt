@@ -109,6 +109,8 @@ class AiProcessingWorker(
     private suspend fun promoteToForeground(taskType: String) {
         try {
             setForeground(createForegroundInfo(taskType))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w("AiProcessingWorker", "Foreground promotion refused", e)
         }
@@ -232,6 +234,15 @@ class AiProcessingWorker(
             // Also stop legacy work without a generation, without touching newer requests.
             workManager.cancelUniqueWork(workTag(meetingId, taskType))
             return workManager.cancelUniqueWork(uniqueWorkName(meetingId, taskType, generation))
+        }
+
+        fun cancelAllForMeeting(context: Context, meetingId: Long) {
+            val workManager = WorkManager.getInstance(context)
+            listOf(TASK_TRANSCRIBE, TASK_PROTOCOLIZE).forEach { taskType ->
+                val tag = workTag(meetingId, taskType)
+                workManager.cancelAllWorkByTag(tag)
+                workManager.cancelUniqueWork(tag)
+            }
         }
 
         fun enqueue(

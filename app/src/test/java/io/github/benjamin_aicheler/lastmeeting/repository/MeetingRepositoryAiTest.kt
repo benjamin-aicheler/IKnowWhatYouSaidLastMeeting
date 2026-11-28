@@ -14,6 +14,7 @@ import io.github.benjamin_aicheler.lastmeeting.util.AndroidAudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmentationSession
 import io.github.benjamin_aicheler.lastmeeting.util.AudioSegmenter
 import io.github.benjamin_aicheler.lastmeeting.worker.AiProcessingWorker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -882,6 +883,154 @@ class MeetingRepositoryAiTest {
         assertTrue(result.exceptionOrNull() is IncompleteCompletionException)
         assertTrue(cleanedUp)
         assertEquals(original, dao.getMeetingByIdDirect(id))
+    }
+
+    @Test
+    fun changedTranscriptReportsExactSupersededProtocolGenerationAfterCommit() = runBlocking {
+        val supersededCalls = mutableListOf<Pair<Long, Long>>()
+        var transcriptInDaoDuringCallback: String? = null
+        var protocolInDaoDuringCallback: String? = "sentinel"
+        settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "test-key",
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = settingsRepository,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                    response(chain.request(), "Updated transcript")
+                }).build()
+            ),
+            onProtocolGenerationSuperseded = { meetingId, generation ->
+                supersededCalls += meetingId to generation
+                val snapshot = runBlocking { dao.getMeetingByIdDirect(meetingId)!! }
+                transcriptInDaoDuringCallback = snapshot.transcript
+                protocolInDaoDuringCallback = snapshot.protocol
+            }
+        )
+        val id = dao.insertMeeting(
+            MeetingEntity(
+                title = "Meeting",
+                startTime = 1L,
+                endTime = 2L,
+                audioFilePath = File.createTempFile("superseded-", ".m4a", app.filesDir).apply {
+                    writeText("Audio")
+                }.absolutePath,
+                transcript = "Existing transcript",
+                protocol = "Existing protocol",
+                protocolGeneration = 3L
+            )
+        )
+
+        val outcome = repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow()
+
+        assertEquals(AiGenerationOutcome.Stored("Updated transcript"), outcome)
+        assertEquals(listOf(id to 3L), supersededCalls)
+        assertEquals("Updated transcript", transcriptInDaoDuringCallback)
+        assertNull(protocolInDaoDuringCallback)
+        assertEquals(4L, dao.getMeetingByIdDirect(id)!!.protocolGeneration)
+    }
+
+    @Test
+    fun identicalTranscriptDoesNotReportSupersededProtocolGeneration() = runBlocking {
+        val supersededCalls = mutableListOf<Pair<Long, Long>>()
+        settingsRepository.saveSettings(
+            baseUrl = SettingsRepository.DEFAULT_BASE_URL,
+            apiKey = "test-key",
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = settingsRepository,
+            apiClient = OpenAiApiClient(
+                httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                    response(chain.request(), "Existing transcript")
+                }).build()
+            ),
+            onProtocolGenerationSuperseded = { meetingId, generation ->
+                supersededCalls += meetingId to generation
+            }
+        )
+        val id = insertAiMeeting()
+
+        val outcome = repository.transcribeMeeting(id, 0L, currentRevision()).getOrThrow()
+
+        assertEquals(AiGenerationOutcome.Stored("Existing transcript"), outcome)
+        assertTrue(supersededCalls.isEmpty())
+    }
+
+    @Test
+    fun cancellingTranscriptionAbortsInFlightRequestAndCleansUpSegmentSession() = runBlocking {
+        val seg = File.createTempFile("seg-cancel-", ".m4a", app.cacheDir).apply { writeText("part1") }
+        var cleanedUp = false
+        val segmenter = AudioSegmenter { _, _ ->
+            Result.success(AudioSegmentationSession(listOf(seg)) {
+                cleanedUp = true
+                seg.delete()
+            })
+        }
+        val requestStarted = CompletableDeferred<Unit>()
+        val releaseServer = CountDownLatch(1)
+        val server = java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())
+        val serverThread = kotlin.concurrent.thread(isDaemon = true) {
+            runCatching {
+                server.accept().use { socket ->
+                    val reader = socket.getInputStream().bufferedReader()
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (line.isEmpty()) break
+                    }
+                    requestStarted.complete(Unit)
+                    releaseServer.await(5, TimeUnit.SECONDS)
+                }
+            }
+        }
+        settingsRepository.saveSettings(
+            baseUrl = "http://127.0.0.1:${server.localPort}/v1/",
+            apiKey = "test-key",
+            transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS,
+            transcriptionModel = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+            protocolModel = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+            transcriptionPrompt = "Transcribe",
+            protocolPrompt = "Summarize"
+        )
+        val okHttp = OkHttpClient()
+        val repository = MeetingRepository(
+            context = app,
+            meetingDao = dao,
+            settingsRepository = settingsRepository,
+            apiClient = OpenAiApiClient(httpClient = okHttp),
+            audioSegmenter = segmenter
+        )
+        val id = insertAiMeeting()
+        val original = dao.getMeetingByIdDirect(id)
+        val revision = currentRevision()
+
+        try {
+            val job = async(Dispatchers.Default) { repository.transcribeMeeting(id, 0L, revision) }
+            withTimeout(5_000) { requestStarted.await() }
+            job.cancel()
+            val thrown = runCatching { withTimeout(5_000) { job.await() } }.exceptionOrNull()
+            assertTrue("Expected CancellationException, got $thrown", thrown is CancellationException)
+            assertTrue(cleanedUp)
+            assertEquals(original, dao.getMeetingByIdDirect(id))
+        } finally {
+            releaseServer.countDown()
+            server.close()
+            serverThread.join(2_000)
+            okHttp.dispatcher.executorService.shutdown()
+            okHttp.connectionPool.evictAll()
+        }
     }
 
     private suspend fun currentRevision(): Long =
