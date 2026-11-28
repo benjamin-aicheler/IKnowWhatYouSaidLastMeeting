@@ -108,6 +108,8 @@
     <string name="msg_ai_error_network">Netzwerkfehler beim Kontaktieren des API-Endpunkts.</string>
     <string name="msg_ai_error_invalid_response">Der API-Endpunkt hat eine unerwartete Antwort zurückgegeben.</string>
     <string name="msg_ai_error_incomplete_response">Die KI-Antwort war unvollständig. Vorhandene Ergebnisse wurden beibehalten.</string>
+    <string name="msg_ai_error_empty_transcript">In der Aufnahme wurde keine Sprache erkannt. Vorhandene Ergebnisse wurden beibehalten.</string>
+    <string name="msg_ai_error_empty_response">Die KI hat eine leere Antwort zurückgegeben. Vorhandene Ergebnisse wurden beibehalten.</string>
     <string name="msg_ai_error_unknown">KI-Verarbeitung fehlgeschlagen.</string>
 
     <!-- Settings -->

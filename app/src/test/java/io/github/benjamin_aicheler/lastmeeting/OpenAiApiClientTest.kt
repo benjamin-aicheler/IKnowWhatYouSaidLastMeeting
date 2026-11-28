@@ -3,7 +3,9 @@ package io.github.benjamin_aicheler.lastmeeting
 import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
 import io.github.benjamin_aicheler.lastmeeting.data.api.BaseUrlValidationResult
+import io.github.benjamin_aicheler.lastmeeting.data.api.EmptyAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
+import io.github.benjamin_aicheler.lastmeeting.data.api.MalformedAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.OpenAiApiClient
 import io.github.benjamin_aicheler.lastmeeting.data.api.UnexpectedModelsResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.UnsupportedModelsEndpointException
@@ -970,6 +972,101 @@ class OpenAiApiClientTest {
                 okHttp.dispatcher.executorService.shutdown()
                 okHttp.connectionPool.evictAll()
             }
+        }
+    }
+
+    @Test
+    fun testBlankAndMalformed2xxResponsesAreDistinguishedByRoute() = runBlocking {
+        val tempFile = File.createTempFile("meeting_blank_malformed", ".m4a").apply {
+            writeBytes(byteArrayOf(1, 2, 3, 4))
+        }
+        fun clientWithBody(jsonBody: String): OpenAiApiClient = OpenAiApiClient(
+            httpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(jsonBody.toResponseBody("application/json".toMediaType()))
+                    .build()
+            }).build()
+        )
+
+        try {
+            // Blank transcription passes through as "" for both multipart and chat-audio
+            for (blankTextJson in listOf("""{"text":""}""", """{"text":"   "}""")) {
+                val res = clientWithBody(blankTextJson).transcribeAudio(
+                    baseUrl = "https://api.openai.com/v1/",
+                    apiKey = "sk-test",
+                    model = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+                    prompt = "",
+                    audioFile = tempFile,
+                    transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS
+                )
+                assertEquals("", res.getOrNull())
+            }
+
+            val blankChatAudio = clientWithBody("""{"choices":[{"message":{"content":"  "},"finish_reason":"stop"}]}""")
+                .transcribeAudio(
+                    baseUrl = "https://openrouter.ai/api/v1/",
+                    apiKey = "sk-test",
+                    model = "google/gemini-2.5-flash",
+                    prompt = "Transcribe",
+                    audioFile = tempFile,
+                    transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS
+                )
+            assertEquals("", blankChatAudio.getOrNull())
+
+            // Blank text-protocol completion fails with EmptyAiResponseException (not IOException)
+            val blankProtocol = clientWithBody("""{"choices":[{"message":{"content":"   "},"finish_reason":"stop"}]}""")
+                .generateFromText(
+                    baseUrl = "https://api.openai.com/v1/",
+                    apiKey = "sk-test",
+                    model = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+                    systemPrompt = "Summarize",
+                    userText = "Meeting transcript"
+                )
+            assertTrue(blankProtocol.exceptionOrNull() is EmptyAiResponseException)
+
+            // Missing fields / error envelopes / empty choices fail with MalformedAiResponseException
+            for (malformedTranscription in listOf("""{}""", """{"error":{"message":"quota"}}""")) {
+                val res = clientWithBody(malformedTranscription).transcribeAudio(
+                    baseUrl = "https://api.openai.com/v1/",
+                    apiKey = "sk-test",
+                    model = SettingsRepository.DEFAULT_TRANSCRIPTION_MODEL,
+                    prompt = "",
+                    audioFile = tempFile,
+                    transcriptionMode = TranscriptionMode.AUDIO_TRANSCRIPTIONS
+                )
+                assertTrue(res.exceptionOrNull() is MalformedAiResponseException)
+            }
+
+            for (malformedChat in listOf(
+                """{"choices":[]}""",
+                """{"choices":[{"message":{},"finish_reason":"stop"}]}""",
+                """{"error":{"message":"upstream error"}}"""
+            )) {
+                val audioRes = clientWithBody(malformedChat).transcribeAudio(
+                    baseUrl = "https://openrouter.ai/api/v1/",
+                    apiKey = "sk-test",
+                    model = "google/gemini-2.5-flash",
+                    prompt = "Transcribe",
+                    audioFile = tempFile,
+                    transcriptionMode = TranscriptionMode.CHAT_COMPLETIONS
+                )
+                assertTrue(audioRes.exceptionOrNull() is MalformedAiResponseException)
+
+                val protocolRes = clientWithBody(malformedChat).generateFromText(
+                    baseUrl = "https://api.openai.com/v1/",
+                    apiKey = "sk-test",
+                    model = SettingsRepository.DEFAULT_PROTOCOL_MODEL,
+                    systemPrompt = "Summarize",
+                    userText = "Transcript"
+                )
+                assertTrue(protocolRes.exceptionOrNull() is MalformedAiResponseException)
+            }
+        } finally {
+            tempFile.delete()
         }
     }
 }

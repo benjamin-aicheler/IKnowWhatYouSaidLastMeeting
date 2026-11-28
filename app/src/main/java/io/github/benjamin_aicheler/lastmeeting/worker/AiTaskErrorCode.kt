@@ -4,7 +4,9 @@ import android.content.Context
 import io.github.benjamin_aicheler.lastmeeting.R
 import io.github.benjamin_aicheler.lastmeeting.data.api.ApiHttpException
 import io.github.benjamin_aicheler.lastmeeting.data.api.AudioFileTooLargeException
+import io.github.benjamin_aicheler.lastmeeting.data.api.EmptyAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.data.api.IncompleteCompletionException
+import io.github.benjamin_aicheler.lastmeeting.data.api.MalformedAiResponseException
 import io.github.benjamin_aicheler.lastmeeting.repository.MeetingRepository
 import io.github.benjamin_aicheler.lastmeeting.repository.ProviderConfigurationChangedException
 import kotlinx.serialization.SerializationException
@@ -30,6 +32,8 @@ enum class AiTaskErrorCode(val code: String) {
     NETWORK_ERROR("network_error"),
     RESPONSE_PARSE_ERROR("response_parse_error"),
     INCOMPLETE_RESPONSE("incomplete_response"),
+    EMPTY_TRANSCRIPT("empty_transcript"),
+    EMPTY_RESPONSE("empty_response"),
     INVALID_WORK_REQUEST("invalid_work_request"),
     UNKNOWN("unknown");
 
@@ -48,6 +52,8 @@ enum class AiTaskErrorCode(val code: String) {
             NETWORK_ERROR -> R.string.msg_ai_error_network
             RESPONSE_PARSE_ERROR -> R.string.msg_ai_error_invalid_response
             INCOMPLETE_RESPONSE -> R.string.msg_ai_error_incomplete_response
+            EMPTY_TRANSCRIPT -> R.string.msg_ai_error_empty_transcript
+            EMPTY_RESPONSE -> R.string.msg_ai_error_empty_response
             INVALID_WORK_REQUEST, UNKNOWN -> R.string.msg_ai_error_unknown
         }
     )
@@ -61,6 +67,8 @@ enum class AiTaskErrorCode(val code: String) {
             is ProviderConfigurationChangedException -> PROVIDER_CONFIG_CHANGED
             is AudioFileTooLargeException -> AUDIO_TOO_LARGE
             is IncompleteCompletionException -> INCOMPLETE_RESPONSE
+            is EmptyAiResponseException -> EMPTY_RESPONSE
+            is MalformedAiResponseException -> RESPONSE_PARSE_ERROR
             is ApiHttpException -> when (error.code) {
                 401, 403 -> AUTH_FAILED
                 429 -> RATE_LIMITED

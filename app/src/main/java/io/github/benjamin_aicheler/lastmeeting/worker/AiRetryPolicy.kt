@@ -21,7 +21,7 @@ internal object AiRetryPolicy {
     private fun isTransient(error: Throwable): Boolean = when {
         // A 4xx means the request itself is wrong: bad key, unsupported model, oversized payload.
         error is ApiHttpException -> error.code == 429 || error.code in 500..599
-        // Timeouts, dropped connections, and empty completions are worth one more try.
+        // Timeouts and dropped connections are worth one more try.
         error is IOException -> true
         else -> false
     }
