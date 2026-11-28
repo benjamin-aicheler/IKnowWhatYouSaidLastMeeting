@@ -5,11 +5,23 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.graphics.text.LineBreaker
+import android.os.Build
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import io.github.benjamin_aicheler.lastmeeting.R
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
+
+internal data class PaginatedLineSlice(
+    val startLine: Int,
+    val endLine: Int,
+    val startsOnNewPage: Boolean,
+    val height: Float
+)
 
 object PdfExporter {
 
@@ -98,7 +110,66 @@ object PdfExporter {
         }
     }
 
-    private fun writePdfDocument(
+    internal fun paginateLineHeights(
+        lineHeights: List<Float>,
+        currentY: Float,
+        pageTopY: Float,
+        pageBottomY: Float
+    ): Pair<List<PaginatedLineSlice>, Float> {
+        if (lineHeights.isEmpty()) {
+            return emptyList<PaginatedLineSlice>() to currentY
+        }
+
+        val slices = mutableListOf<PaginatedLineSlice>()
+        var y = currentY
+        var lineIndex = 0
+        while (lineIndex < lineHeights.size) {
+            val startsOnNewPage = y > pageTopY && y + lineHeights[lineIndex] > pageBottomY
+            if (startsOnNewPage) {
+                y = pageTopY
+            }
+
+            val startLine = lineIndex
+            var endLine = lineIndex
+            var sliceHeight = lineHeights[lineIndex]
+            while (
+                endLine + 1 < lineHeights.size &&
+                y + sliceHeight + lineHeights[endLine + 1] <= pageBottomY
+            ) {
+                endLine++
+                sliceHeight += lineHeights[endLine]
+            }
+
+            slices += PaginatedLineSlice(
+                startLine = startLine,
+                endLine = endLine,
+                startsOnNewPage = startsOnNewPage,
+                height = sliceHeight
+            )
+            y += sliceHeight
+            lineIndex = endLine + 1
+        }
+        return slices to y
+    }
+
+    internal fun buildStaticLayout(
+        text: CharSequence,
+        paint: TextPaint,
+        width: Int
+    ): StaticLayout {
+        val builder = StaticLayout.Builder
+            .obtain(text, 0, text.length, paint, width.coerceAtLeast(1))
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setLineSpacing(2f, 1.15f)
+            .setIncludePad(true)
+            .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setBreakStrategy(LineBreaker.BREAK_STRATEGY_SIMPLE)
+        }
+        return builder.build()
+    }
+
+    internal fun writePdfDocument(
         title: String,
         typeLabel: String,
         textContent: String,
@@ -110,64 +181,107 @@ object PdfExporter {
             val pageHeight = 842 // A4 height in points
             val margin = 40
             val contentWidth = pageWidth - (margin * 2)
+            val pageTopY = margin.toFloat()
+            val pageBottomY = (pageHeight - margin).toFloat()
 
             var pageNumber = 1
-            var pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
-            var page = pdfDocument.startPage(pageInfo)
+            var page = pdfDocument.startPage(
+                PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+            )
             var canvas = page.canvas
+            var currentY = pageTopY
 
-            val titlePaint = Paint().apply {
+            fun startNextPage() {
+                pdfDocument.finishPage(page)
+                pageNumber++
+                page = pdfDocument.startPage(
+                    PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+                )
+                canvas = page.canvas
+                currentY = pageTopY
+            }
+
+            fun drawPaginatedLayout(layout: StaticLayout) {
+                val lineHeights = (0 until layout.lineCount).map { i ->
+                    (layout.getLineBottom(i) - layout.getLineTop(i)).toFloat()
+                }
+                val (slices, _) = paginateLineHeights(lineHeights, currentY, pageTopY, pageBottomY)
+                for (slice in slices) {
+                    if (slice.startsOnNewPage) {
+                        startNextPage()
+                    }
+                    val sliceTop = layout.getLineTop(slice.startLine).toFloat()
+                    val sliceBottom = layout.getLineBottom(slice.endLine).toFloat()
+                    canvas.save()
+                    canvas.translate(margin.toFloat(), currentY - sliceTop)
+                    canvas.clipRect(0f, sliceTop, contentWidth.toFloat(), sliceBottom)
+                    layout.draw(canvas)
+                    canvas.restore()
+                    currentY += (sliceBottom - sliceTop)
+                }
+            }
+
+            val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 textSize = 18f
                 color = Color.BLACK
             }
 
-            val subtitlePaint = Paint().apply {
+            val subtitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
                 textSize = 12f
                 color = Color.DKGRAY
             }
 
-            val bodyPaint = Paint().apply {
+            val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = Typeface.DEFAULT
                 textSize = 11f
                 color = Color.BLACK
             }
 
-            var y = margin.toFloat() + 20f
-
-            // Draw Header (wrapped if title is long)
-            for (titleLine in wrapText(title, titlePaint, contentWidth.toFloat())) {
-                canvas.drawText(titleLine, margin.toFloat(), y, titlePaint)
-                y += 24f
-            }
-            canvas.drawText(typeLabel, margin.toFloat(), y, subtitlePaint)
-            y += 20f
-
-            // Draw line divider
             val linePaint = Paint().apply {
                 color = Color.LTGRAY
                 strokeWidth = 1f
             }
-            canvas.drawLine(margin.toFloat(), y, (pageWidth - margin).toFloat(), y, linePaint)
-            y += 20f
 
-            // Wrap text lines
-            val lines = textContent.split("\n")
-            for (line in lines) {
-                val wrappedLines = wrapText(line, bodyPaint, contentWidth.toFloat())
-                for (wrappedLine in wrappedLines) {
-                    if (y > pageHeight - margin - 20) {
-                        pdfDocument.finishPage(page)
-                        pageNumber++
-                        pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
-                        page = pdfDocument.startPage(pageInfo)
-                        canvas = page.canvas
-                        y = margin.toFloat() + 20f
-                    }
-                    canvas.drawText(wrappedLine, margin.toFloat(), y, bodyPaint)
-                    y += 16f
-                }
+            // Title (paginated across pages when long)
+            drawPaginatedLayout(buildStaticLayout(title, titlePaint, contentWidth))
+            currentY += 6f
+
+            // Reserve subtitle + divider together so the divider stays attached to the subtitle.
+            val subtitleLayout = buildStaticLayout(typeLabel, subtitlePaint, contentWidth)
+            val subtitleDividerGap = 8f
+            val dividerThickness = 1f
+            val afterDividerGap = 14f
+            val subtitleBlockHeight = subtitleLayout.height.toFloat() + subtitleDividerGap + dividerThickness
+            if (currentY > pageTopY &&
+                currentY + subtitleBlockHeight > pageBottomY &&
+                subtitleBlockHeight <= (pageBottomY - pageTopY)
+            ) {
+                startNextPage()
+            }
+
+            drawPaginatedLayout(subtitleLayout)
+            currentY += subtitleDividerGap
+            if (currentY > pageTopY && currentY + dividerThickness > pageBottomY) {
+                startNextPage()
+            }
+            canvas.drawLine(
+                margin.toFloat(),
+                currentY,
+                (pageWidth - margin).toFloat(),
+                currentY,
+                linePaint
+            )
+            currentY += afterDividerGap
+
+            // Body paragraphs (preserving blank lines and pagination)
+            val paragraphs = textContent
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .split("\n")
+            for (paragraph in paragraphs) {
+                drawPaginatedLayout(buildStaticLayout(paragraph, bodyPaint, contentWidth))
             }
 
             pdfDocument.finishPage(page)
@@ -175,44 +289,5 @@ object PdfExporter {
         } finally {
             pdfDocument.close()
         }
-    }
-
-    private fun wrapText(text: String, paint: Paint, maxWidth: Float): List<String> {
-        if (text.isBlank()) return listOf("")
-        val result = mutableListOf<String>()
-        val words = text.split(" ")
-        var currentLine = ""
-
-        for (word in words) {
-            val testLine = if (currentLine.isEmpty()) word else "$currentLine $word"
-            if (paint.measureText(testLine) <= maxWidth) {
-                currentLine = testLine
-            } else {
-                if (currentLine.isNotEmpty()) {
-                    result.add(currentLine)
-                    currentLine = ""
-                }
-                if (paint.measureText(word) <= maxWidth) {
-                    currentLine = word
-                } else {
-                    // Break single word that exceeds maxWidth
-                    var chunk = ""
-                    for (ch in word) {
-                        val nextChunk = chunk + ch
-                        if (paint.measureText(nextChunk) <= maxWidth) {
-                            chunk = nextChunk
-                        } else {
-                            if (chunk.isNotEmpty()) result.add(chunk)
-                            chunk = ch.toString()
-                        }
-                    }
-                    currentLine = chunk
-                }
-            }
-        }
-        if (currentLine.isNotEmpty()) {
-            result.add(currentLine)
-        }
-        return result
     }
 }
